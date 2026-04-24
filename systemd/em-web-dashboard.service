@@ -1,0 +1,14 @@
+[Unit]
+Description=EM Server Web Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/EM_server
+ExecStart=/home/pi/EM_server/venv/bin/python app.py --config config.json
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

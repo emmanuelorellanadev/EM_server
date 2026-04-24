@@ -1,0 +1,35 @@
+{
+  "mqtt": {
+    "broker": "localhost",
+    "port": 1883,
+    "username": "",
+    "password": "",
+    "topics": {
+      "esp8266": "sensors/esp8266",
+      "raspberrypi": "sensors/raspberrypi",
+      "all": "sensors/#",
+      "cmd_esp8266": "commands/esp8266"
+    },
+    "client_id_subscriber": "em_server_subscriber",
+    "client_id_sensehat": "em_server_sensehat"
+  },
+  "database": {
+    "path": "em_server.db"
+  },
+  "web": {
+    "host": "0.0.0.0",
+    "port": 5000,
+    "debug": false,
+    "secret_key": "change-this-secret-key-in-production"
+  },
+  "sense_hat": {
+    "publish_interval_seconds": 30,
+    "topic": "sensors/raspberrypi"
+  },
+  "field_mappings": {
+    "esp8266": {
+      "percent": "soil_humidity",
+      "raw":     "soil_raw"
+    }
+  }
+}

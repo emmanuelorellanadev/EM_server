@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Historial – EM Server{% endblock %}
+
+{% block content %}
+<section class="history-section">
+  <div class="section-header">
+    <h2>Historial de Lecturas</h2>
+  </div>
+
+  <form class="filter-form" method="get" action="{{ url_for('history') }}">
+    <label for="source">Fuente:</label>
+    <select name="source" id="source">
+      <option value="">Todas</option>
+      {% for src in sources %}
+        <option value="{{ src }}" {% if selected_source == src %}selected{% endif %}>{{ src | upper }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="field">Campo:</label>
+    <input type="text" name="field" id="field"
+           placeholder="ej. temperature"
+           value="{{ selected_field or '' }}" />
+
+    <label for="limit">Límite:</label>
+    <select name="limit" id="limit">
+      {% for lim in [50, 100, 200, 500] %}
+        <option value="{{ lim }}" {% if request.args.get('limit', '100') == lim|string %}selected{% endif %}>{{ lim }}</option>
+      {% endfor %}
+    </select>
+
+    <button type="submit">Filtrar</button>
+  </form>
+
+  {% if readings %}
+    <div class="table-wrapper">
+      <table class="readings-table">
+        <thead>
+          <tr>
+            <th>Fecha / Hora (UTC)</th>
+            <th>Fuente</th>
+            <th>Campo</th>
+            <th>Valor</th>
+            <th>Unidad</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in readings %}
+            <tr>
+              <td>{{ r.recorded_at }}</td>
+              <td><span class="badge">{{ r.source }}</span></td>
+              <td>{{ r.field }}</td>
+              <td class="num">{{ "%.2f"|format(r.value) }}</td>
+              <td>{{ r.unit }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty-state">
+      <p>⏳ Sin datos para los filtros seleccionados.</p>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

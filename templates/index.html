@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Dashboard – EM Server{% endblock %}
+
+{% block content %}
+<section class="dashboard">
+  <div class="section-header">
+    <h2>Lecturas Actuales</h2>
+    <button id="refresh-btn" onclick="refreshLatest()">↺ Actualizar</button>
+  </div>
+
+  {% if sources %}
+    <div class="source-tabs" id="source-tabs">
+      {% for src in sources %}
+        <button class="tab-btn {% if loop.first %}active{% endif %}"
+                onclick="showSource('{{ src }}', event)">
+          {{ src | upper }}
+        </button>
+      {% endfor %}
+    </div>
+
+    <div id="cards-container">
+      {% for src in sources %}
+        <div class="source-panel {% if loop.first %}active{% endif %}" id="panel-{{ src }}">
+          <div class="cards-grid">
+            {% for reading in latest if reading.source == src %}
+              <div class="card {{ reading.field }}">
+                <div class="card-icon">{{ field_icon(reading.field) }}</div>
+                <div class="card-body">
+                  <span class="card-label">{{ field_label(reading.field) }}</span>
+                  {% if is_boolean_field(reading.field) %}
+                    <span class="card-value status-badge {% if reading.value %}status-on{% else %}status-off{% endif %}">
+                      {% if reading.value %}Activo{% else %}Inactivo{% endif %}
+                    </span>
+                  {% else %}
+                    <span class="card-value">
+                      {{ "%.1f"|format(reading.value) }}
+                      <small>{{ reading.unit }}</small>
+                    </span>
+                  {% endif %}
+                  <span class="card-time">{{ reading.recorded_at }}</span>
+                </div>
+              </div>
+            {% else %}
+              <p class="no-data">Sin datos aún para {{ src }}.</p>
+            {% endfor %}
+          </div>
+
+          {# Botón de riego manual — solo visible para el panel del ESP8266 #}
+          {% if src == 'esp8266' %}
+          <div class="command-panel">
+            <button class="cmd-btn" onclick="sendWaterCommand(this)">
+              💧 Activar Riego Manual
+            </button>
+            <span class="cmd-status" id="water-cmd-status"></span>
+            <p class="cmd-hint">
+              Envía una instrucción MQTT al invernadero para activar el riego
+              por el tiempo configurado en el ESP8266 (DURACION_RIEGO_MS en config.h).
+            </p>
+          </div>
+          {% endif %}
+
+        </div>
+      {% endfor %}
+    </div>
+
+  {% else %}
+    <div class="empty-state">
+      <p>⏳ Sin datos todavía. Asegúrate de que el broker MQTT esté activo y los sensores estén publicando.</p>
+    </div>
+  {% endif %}
+</section>
+
+<section class="chart-section">
+  <div class="section-header">
+    <h2>Tendencias (últimas 50 lecturas)</h2>
+  </div>
+  <canvas id="trend-chart" height="100"></canvas>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+  const latestData = {{ latest | tojson }};
+  initTrendChart(latestData);
+
+  function showSource(src, event) {
+    document.querySelectorAll('.source-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('panel-' + src).classList.add('active');
+    event.target.classList.add('active');
+  }
+
+  async function refreshLatest() {
+    const btn = document.getElementById('refresh-btn');
+    btn.textContent = '…';
+    const resp = await fetch('/api/latest');
+    const data = await resp.json();
+    updateCards(data);
+    btn.textContent = '↺ Actualizar';
+  }
+</script>
+{% endblock %}

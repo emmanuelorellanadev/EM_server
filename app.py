@@ -11,8 +11,11 @@ Run:
 
 import argparse
 import json
+import logging
 import os
 from flask import Flask, jsonify, render_template, request
+
+import paho.mqtt.publish as mqtt_publish
 
 from database import (
     get_latest_readings,
@@ -20,6 +23,14 @@ from database import (
     get_sources,
     init_db,
 )
+
+# Configure module-level logger so all log calls in this file are formatted
+# consistently and visible in the console / system journal.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("app")
 
 app = Flask(__name__)
 
@@ -143,8 +154,6 @@ def _mqtt_publish_command(mqtt_cfg: dict, topic: str, payload: dict) -> None:
     Raises:
         Exception: Any network or broker error propagated from paho.
     """
-    import paho.mqtt.publish as mqtt_publish
-
     auth = None
     if mqtt_cfg.get("username"):
         auth = {
@@ -190,8 +199,7 @@ def api_command_water():
         # Log the full error server-side but do not expose internal details
         # (stack traces, hostnames, …) to the API caller to avoid information
         # leakage (CWE-209 / CodeQL py/stack-trace-exposure).
-        import logging
-        logging.getLogger("app").error("Failed to publish watering command: %s", exc)
+        logger.error("Failed to publish watering command: %s", exc)
         return jsonify({"error": "No se pudo enviar el comando al broker MQTT"}), 502
 
 

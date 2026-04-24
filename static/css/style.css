@@ -150,6 +150,47 @@ main {
 .status-on  { background: #fff3e0; color: #e65100; }
 .status-off { background: #e8f5e9; color: #1b5e20; }
 
+/* ---- Command panel (manual watering trigger) ---------------------- */
+.command-panel {
+  margin-top: 1.2rem;
+  padding: .9rem 1rem;
+  background: #f1f8e9;
+  border: 1px solid #c5e1a5;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .6rem;
+}
+
+.cmd-btn {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: .5rem 1.1rem;
+  font-size: .95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .2s, opacity .2s;
+}
+.cmd-btn:hover  { background: var(--primary-lt); }
+.cmd-btn:disabled { opacity: .55; cursor: not-allowed; }
+
+.cmd-status {
+  font-size: .9rem;
+  font-weight: 600;
+}
+.cmd-ok  { color: #2e7d32; }
+.cmd-err { color: #b71c1c; }
+
+.cmd-hint {
+  width: 100%;
+  margin: 0;
+  font-size: .78rem;
+  color: var(--muted);
+}
+
 /* ---- Chart section ------------------------------------------------- */
 .chart-section {
   margin-top: 2rem;

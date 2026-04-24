@@ -44,6 +44,21 @@
               <p class="no-data">Sin datos aún para {{ src }}.</p>
             {% endfor %}
           </div>
+
+          {# Botón de riego manual — solo visible para el panel del ESP8266 #}
+          {% if src == 'esp8266' %}
+          <div class="command-panel">
+            <button class="cmd-btn" onclick="sendWaterCommand(this)">
+              💧 Activar Riego Manual
+            </button>
+            <span class="cmd-status" id="water-cmd-status"></span>
+            <p class="cmd-hint">
+              Envía una instrucción MQTT al invernadero para activar el riego
+              por el tiempo configurado en el ESP8266 (DURACION_RIEGO_MS en config.h).
+            </p>
+          </div>
+          {% endif %}
+
         </div>
       {% endfor %}
     </div>

@@ -1,7 +1,9 @@
 """
 app.py – Flask web dashboard for EM_server.
 
-Displays live and historical sensor readings received from the MQTT network.
+Displays live and historical sensor readings received from the MQTT network
+and allows sending remote commands to IoT devices (e.g. start watering on
+the ESP8266) via a simple REST API that publishes to the MQTT broker.
 
 Run:
     python app.py [--config config.json]
@@ -117,6 +119,80 @@ def api_history():
 @app.route("/api/sources")
 def api_sources():
     return jsonify(get_sources(_db_path))
+
+
+# ---------------------------------------------------------------------------
+# Command API routes — publish MQTT commands to IoT devices
+# ---------------------------------------------------------------------------
+
+
+def _mqtt_publish_command(mqtt_cfg: dict, topic: str, payload: dict) -> None:
+    """Publish a single MQTT command message and disconnect immediately.
+
+    Uses paho.mqtt.publish.single() which establishes a temporary connection,
+    publishes the message with QoS 1 (at-least-once delivery), and closes the
+    connection. This is ideal for infrequent, one-shot commands from the web
+    dashboard without keeping a persistent MQTT connection inside the Flask
+    process.
+
+    Args:
+        mqtt_cfg: The ``mqtt`` block from config.json.
+        topic:    MQTT topic to publish to (e.g. "commands/esp8266").
+        payload:  Dict that will be serialised to JSON and sent as the message body.
+
+    Raises:
+        Exception: Any network or broker error propagated from paho.
+    """
+    import paho.mqtt.publish as mqtt_publish
+
+    auth = None
+    if mqtt_cfg.get("username"):
+        auth = {
+            "username": mqtt_cfg["username"],
+            "password": mqtt_cfg.get("password", ""),
+        }
+
+    mqtt_publish.single(
+        topic,
+        payload=json.dumps(payload),
+        qos=1,               # at-least-once delivery
+        hostname=mqtt_cfg["broker"],
+        port=mqtt_cfg["port"],
+        auth=auth,
+    )
+
+
+@app.route("/api/command/water", methods=["POST"])
+def api_command_water():
+    """Send a manual watering command to the ESP8266 via MQTT.
+
+    Publishes ``{"action": "water"}`` to the command topic configured in
+    ``config.json → mqtt.topics.cmd_esp8266``.
+
+    The ESP8266 subscribes to that topic (MQTT_TOPICO_CMD in config.h) and,
+    upon receiving the command, activates the irrigation valve for
+    DURACION_RIEGO_MS milliseconds, cancelling any active cooldown.
+
+    Returns:
+        200 {"ok": true, "topic": "commands/esp8266"}   — command sent
+        503 {"error": "MQTT not configured"}             — no config loaded
+        502 {"error": "<reason>"}                        — broker unreachable
+    """
+    mqtt_cfg = _config.get("mqtt")
+    if not mqtt_cfg:
+        return jsonify({"error": "MQTT not configured"}), 503
+
+    topic = mqtt_cfg.get("topics", {}).get("cmd_esp8266", "commands/esp8266")
+    try:
+        _mqtt_publish_command(mqtt_cfg, topic, {"action": "water"})
+        return jsonify({"ok": True, "topic": topic})
+    except Exception as exc:
+        # Log the full error server-side but do not expose internal details
+        # (stack traces, hostnames, …) to the API caller to avoid information
+        # leakage (CWE-209 / CodeQL py/stack-trace-exposure).
+        import logging
+        logging.getLogger("app").error("Failed to publish watering command: %s", exc)
+        return jsonify({"error": "No se pudo enviar el comando al broker MQTT"}), 502
 
 
 # ---------------------------------------------------------------------------

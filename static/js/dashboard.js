@@ -107,6 +107,61 @@ function updateCards(data) {
 }
 
 // ------------------------------------------------------------------ //
+// Remote watering command — sends POST /api/command/water
+// ------------------------------------------------------------------ //
+
+/**
+ * sendWaterCommand — Sends a manual irrigation command to the ESP8266.
+ *
+ * Flow:
+ *  1. The dashboard calls POST /api/command/water on the Flask server.
+ *  2. Flask publishes {"action":"water"} to "commands/esp8266" via MQTT.
+ *  3. The ESP8266 subscribes to that topic; upon receiving the message its
+ *     mqttCallback() calls startWatering(force=true), which:
+ *       • cancels any active cooldown,
+ *       • opens the solenoid valve (relay HIGH),
+ *       • starts the DURACION_RIEGO_MS countdown.
+ *  4. The dashboard shows a success or error badge next to the button.
+ *
+ * @param {HTMLElement} btn  The button element that triggered the action.
+ */
+async function sendWaterCommand(btn) {
+  const statusEl = document.getElementById('water-cmd-status');
+  btn.disabled = true;
+  if (statusEl) statusEl.textContent = 'Enviando…';
+
+  try {
+    const resp = await fetch('/api/command/water', { method: 'POST' });
+    const data = await resp.json();
+    if (resp.ok) {
+      if (statusEl) {
+        statusEl.textContent = '✅ Comando enviado';
+        statusEl.className = 'cmd-status cmd-ok';
+      }
+    } else {
+      if (statusEl) {
+        statusEl.textContent = '❌ Error: ' + (data.error || resp.status);
+        statusEl.className = 'cmd-status cmd-err';
+      }
+    }
+  } catch (e) {
+    if (statusEl) {
+      statusEl.textContent = '❌ Error de red';
+      statusEl.className = 'cmd-status cmd-err';
+    }
+  }
+
+  btn.disabled = false;
+  // Limpiar el mensaje de estado después de 6 segundos.
+  setTimeout(() => {
+    if (statusEl) {
+      statusEl.textContent = '';
+      statusEl.className = 'cmd-status';
+    }
+  }, 6000);
+}
+
+// ------------------------------------------------------------------ //
 // Auto-refresh every 30 seconds
 // ------------------------------------------------------------------ //
 setInterval(async () => {

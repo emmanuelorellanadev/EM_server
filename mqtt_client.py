@@ -59,6 +59,12 @@ def _on_message(client, userdata, msg):
     parts = topic.split("/")
     source = parts[-1] if len(parts) >= 2 else topic
 
+    # Apply per-source field name mappings defined in config.json.
+    # Example mapping: esp8266 "percent" -> "soil_humidity"
+    mappings = userdata["config"].get("field_mappings", {}).get(source, {})
+    if mappings:
+        payload = {mappings.get(k, k): v for k, v in payload.items()}
+
     logger.debug("Message from %s: %s", source, payload)
     insert_readings_from_payload(db_path, source, payload)
     logger.info("Stored reading from source '%s'", source)

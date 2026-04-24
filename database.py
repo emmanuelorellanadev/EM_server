@@ -74,19 +74,27 @@ def insert_readings_from_payload(
         "pressure":       { "value": 1013, "unit": "hPa" }
     }
 
-    Alternatively, scalar values are also accepted:
+    Scalar numeric and boolean values are also accepted:
         { "temperature": 23.5, "humidity": 60.1 }
+        { "raw": 512, "percent": 42.3, "watering": false, "cooldown": false }
+
+    Boolean values are stored as 1.0 (True) or 0.0 (False).
+    String values are silently skipped.
     """
     now = datetime.now(timezone.utc)
     for field, raw in payload.items():
         if isinstance(raw, dict):
             value = raw.get("value")
             unit = raw.get("unit", "")
+        elif isinstance(raw, bool):
+            # bool must be checked before int since bool is a subclass of int
+            value = 1.0 if raw else 0.0
+            unit = ""
         elif isinstance(raw, (int, float)):
             value = raw
             unit = ""
         else:
-            continue  # skip non-numeric fields
+            continue  # skip non-numeric fields (e.g. strings)
         try:
             insert_reading(db_path, source, field, float(value), unit, now)
         except (TypeError, ValueError):

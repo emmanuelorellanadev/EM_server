@@ -93,6 +93,33 @@ def test_payload_skips_non_numeric(db_path):
     assert "label" not in fields
 
 
+def test_payload_boolean_stored_as_numeric(db_path):
+    """Boolean values (from ESP8266 watering/cooldown) should be stored as 0.0/1.0."""
+    payload = {"watering": True, "cooldown": False}
+    insert_readings_from_payload(db_path, "esp8266", payload)
+    rows = get_readings_history(db_path)
+    by_field = {r["field"]: r["value"] for r in rows}
+    assert by_field["watering"] == 1.0
+    assert by_field["cooldown"] == 0.0
+
+
+def test_payload_esp8266_full(db_path):
+    """Full ESP8266 payload matches expected fields."""
+    payload = {
+        "raw":      512,
+        "percent":  42.3,
+        "state":    "MOIST",  # string – should be skipped
+        "watering": False,
+        "cooldown": False,
+    }
+    insert_readings_from_payload(db_path, "esp8266", payload)
+    rows = get_readings_history(db_path, source="esp8266")
+    fields = {r["field"] for r in rows}
+    # state is a string → skipped; raw, percent, watering, cooldown stored
+    assert "state" not in fields
+    assert {"raw", "percent", "watering", "cooldown"} == fields
+
+
 # ---------------------------------------------------------------------------
 # get_latest_readings
 # ---------------------------------------------------------------------------

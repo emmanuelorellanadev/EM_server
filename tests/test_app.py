@@ -106,3 +106,25 @@ def test_api_sources_returns_sources(client):
     resp = c.get("/api/sources")
     data = resp.get_json()
     assert set(data) == {"esp8266", "raspberrypi"}
+
+
+# ---------------------------------------------------------------------------
+# Boolean fields rendered as status badges
+# ---------------------------------------------------------------------------
+
+def test_index_shows_watering_status(client):
+    c, db = client
+    database.insert_reading(db, "esp8266", "watering", 1.0)
+    resp = c.get("/")
+    assert resp.status_code == 200
+    assert b"status-on" in resp.data
+
+
+def test_api_latest_includes_boolean_fields(client):
+    c, db = client
+    database.insert_reading(db, "esp8266", "watering", 0.0)
+    database.insert_reading(db, "esp8266", "cooldown", 1.0)
+    data = c.get("/api/latest").get_json()
+    fields = {r["field"] for r in data}
+    assert "watering" in fields
+    assert "cooldown" in fields

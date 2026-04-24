@@ -24,5 +24,11 @@
   "sense_hat": {
     "publish_interval_seconds": 30,
     "topic": "sensors/raspberrypi"
+  },
+  "field_mappings": {
+    "esp8266": {
+      "percent": "soil_humidity",
+      "raw":     "soil_raw"
+    }
   }
 }

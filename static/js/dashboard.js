@@ -9,9 +9,15 @@ const FIELD_META = {
   temperature:   { label: 'Temperatura',         icon: '🌡️'  },
   humidity:      { label: 'Humedad Ambiental',    icon: '💧'  },
   soil_humidity: { label: 'Humedad de Suelo',     icon: '🌱'  },
+  soil_raw:      { label: 'ADC Bruto',            icon: '📟'  },
   light:         { label: 'Iluminación',          icon: '☀️'  },
   pressure:      { label: 'Presión Atmosférica',  icon: '🌀'  },
+  watering:      { label: 'Riego Activo',         icon: '🚿'  },
+  cooldown:      { label: 'En Cooldown',          icon: '⏳'  },
 };
+
+// Fields rendered as on/off rather than a number
+const BOOLEAN_FIELDS = new Set(['watering', 'cooldown']);
 
 function fieldLabel(field) {
   return (FIELD_META[field] || {}).label || field;
@@ -85,7 +91,16 @@ function updateCards(data) {
     cards.forEach(card => {
       const valEl = card.querySelector('.card-value');
       const timeEl = card.querySelector('.card-time');
-      if (valEl) valEl.innerHTML = `${parseFloat(r.value).toFixed(1)} <small>${r.unit}</small>`;
+      if (valEl) {
+        if (BOOLEAN_FIELDS.has(r.field)) {
+          const on = r.value !== 0;
+          valEl.className = `card-value status-badge ${on ? 'status-on' : 'status-off'}`;
+          valEl.textContent = on ? 'Activo' : 'Inactivo';
+        } else {
+          valEl.className = 'card-value';
+          valEl.innerHTML = `${parseFloat(r.value).toFixed(1)} <small>${r.unit}</small>`;
+        }
+      }
       if (timeEl) timeEl.textContent = r.recorded_at;
     });
   });

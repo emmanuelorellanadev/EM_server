@@ -29,16 +29,25 @@ _FIELD_ICONS = {
     "temperature":   "🌡️",
     "humidity":      "💧",
     "soil_humidity": "🌱",
+    "soil_raw":      "📟",
     "light":         "☀️",
     "pressure":      "🌀",
+    "watering":      "🚿",
+    "cooldown":      "⏳",
 }
 _FIELD_LABELS = {
     "temperature":   "Temperatura",
     "humidity":      "Humedad Ambiental",
     "soil_humidity": "Humedad de Suelo",
+    "soil_raw":      "ADC Bruto",
     "light":         "Iluminación",
     "pressure":      "Presión Atmosférica",
+    "watering":      "Riego Activo",
+    "cooldown":      "En Cooldown",
 }
+
+# Fields that represent boolean on/off state (stored as 1.0 / 0.0)
+BOOLEAN_FIELDS = {"watering", "cooldown"}
 
 
 @app.template_global()
@@ -49,6 +58,11 @@ def field_icon(field: str) -> str:
 @app.template_global()
 def field_label(field: str) -> str:
     return _FIELD_LABELS.get(field, field.replace("_", " ").title())
+
+
+@app.template_global()
+def is_boolean_field(field: str) -> bool:
+    return field in BOOLEAN_FIELDS
 
 _config: dict = {}
 _db_path: str = "em_server.db"

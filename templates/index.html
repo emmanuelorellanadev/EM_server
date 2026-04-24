@@ -27,10 +27,16 @@
                 <div class="card-icon">{{ field_icon(reading.field) }}</div>
                 <div class="card-body">
                   <span class="card-label">{{ field_label(reading.field) }}</span>
-                  <span class="card-value">
-                    {{ "%.1f"|format(reading.value) }}
-                    <small>{{ reading.unit }}</small>
-                  </span>
+                  {% if is_boolean_field(reading.field) %}
+                    <span class="card-value status-badge {% if reading.value %}status-on{% else %}status-off{% endif %}">
+                      {% if reading.value %}Activo{% else %}Inactivo{% endif %}
+                    </span>
+                  {% else %}
+                    <span class="card-value">
+                      {{ "%.1f"|format(reading.value) }}
+                      <small>{{ reading.unit }}</small>
+                    </span>
+                  {% endif %}
                   <span class="card-time">{{ reading.recorded_at }}</span>
                 </div>
               </div>

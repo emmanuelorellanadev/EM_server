@@ -77,9 +77,9 @@
 //              Corresponde al ADC interno con divisor de tensión 0-3.3 V
 //   D5/GPIO14 → salida digital (DO) del sensor K8/C11
 //              (umbral configurable con el potenciómetro del módulo)
-//   D6/GPIO12 → señal de control del módulo relé
+//   D1/GPIO5  → señal de control del módulo relé
 #define PIN_SENSOR_DO   14   // D5 en la serigrafía del NodeMCU V3
-#define PIN_RELAY       12   // D6 en la serigrafía del NodeMCU V3
+#define PIN_RELAY        5   // D1 en la serigrafía del NodeMCU V3
 
 // ── Calibración del sensor analógico ─────────────────────────────
 // El sensor K8/C11 es de tipo resistivo: su resistencia cambia según

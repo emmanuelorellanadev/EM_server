@@ -8,7 +8,11 @@ schema changes.
 
 import sqlite3
 import json
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+# Guatemala does not observe daylight saving time; it is always UTC-6.
+_TZ_GUATEMALA = ZoneInfo("America/Guatemala")
 
 
 def get_connection(db_path: str) -> sqlite3.Connection:
@@ -49,8 +53,8 @@ def insert_reading(
     recorded_at: datetime | None = None,
 ) -> None:
     if recorded_at is None:
-        recorded_at = datetime.now(timezone.utc)
-    ts = recorded_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+        recorded_at = datetime.now(_TZ_GUATEMALA)
+    ts = recorded_at.strftime("%Y-%m-%dT%H:%M:%S-06:00")
     with get_connection(db_path) as conn:
         conn.execute(
             "INSERT INTO readings (source, field, value, unit, recorded_at) "
@@ -81,7 +85,7 @@ def insert_readings_from_payload(
     Boolean values are stored as 1.0 (True) or 0.0 (False).
     String values are silently skipped.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(_TZ_GUATEMALA)
     for field, raw in payload.items():
         if isinstance(raw, dict):
             value = raw.get("value")

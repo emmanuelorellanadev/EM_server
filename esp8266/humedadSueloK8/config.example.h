@@ -194,8 +194,8 @@
 //   PUBLICACIÓN (ESP8266 → Raspberry Pi):
 //     El ESP8266 envía lecturas del sensor cada BACKGROUND_SAMPLE_MS.
 //     Tópico: sensors/esp8266
-//     Ejemplo: {"raw":450,"percent":51.5,"state":"WET",
-//               "watering":false,"cooldown":false}
+//     Ejemplo: {"percent":51.5,"state":"WET","watering":false,
+//               "on_threshold_percent":35,"relay_on_time_s":1.0}
 //     La Raspberry Pi (mqtt_client.py) escucha "sensors/#" y guarda
 //     cada mensaje en la base de datos SQLite.
 //

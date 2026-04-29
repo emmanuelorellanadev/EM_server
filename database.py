@@ -80,7 +80,8 @@ def insert_readings_from_payload(
 
     Scalar numeric and boolean values are also accepted:
         { "temperature": 23.5, "humidity": 60.1 }
-        { "raw": 512, "percent": 42.3, "watering": false, "cooldown": false }
+        { "percent": 42.3, "watering": false,
+          "on_threshold_percent": 35, "relay_on_time_s": 1.0 }
 
     Boolean values are stored as 1.0 (True) or 0.0 (False).
     String values are silently skipped.

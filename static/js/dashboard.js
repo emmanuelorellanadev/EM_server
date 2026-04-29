@@ -6,18 +6,18 @@
 // Field metadata
 // ------------------------------------------------------------------ //
 const FIELD_META = {
-  temperature:   { label: 'Temperatura',         icon: '🌡️'  },
-  humidity:      { label: 'Humedad Ambiental',    icon: '💧'  },
-  soil_humidity: { label: 'Humedad de Suelo',     icon: '🌱'  },
-  soil_raw:      { label: 'ADC Bruto',            icon: '📟'  },
-  light:         { label: 'Iluminación',          icon: '☀️'  },
-  pressure:      { label: 'Presión Atmosférica',  icon: '🌀'  },
-  watering:      { label: 'Riego Activo',         icon: '🚿'  },
-  cooldown:      { label: 'En Cooldown',          icon: '⏳'  },
+  temperature:          { label: 'Temperatura',              icon: '🌡️'  },
+  humidity:             { label: 'Humedad Ambiental',         icon: '💧'  },
+  soil_humidity:        { label: 'Humedad de Suelo',          icon: '🌱'  },
+  light:                { label: 'Iluminación',               icon: '☀️'  },
+  pressure:             { label: 'Presión Atmosférica',       icon: '🌀'  },
+  watering:             { label: 'Riego Activo',              icon: '🚿'  },
+  on_threshold_percent: { label: 'Umbral de Activación (%)', icon: '🎯'  },
+  relay_on_time_s:      { label: 'Duración de Riego (s)',    icon: '⏱️'  },
 };
 
 // Fields rendered as on/off rather than a number
-const BOOLEAN_FIELDS = new Set(['watering', 'cooldown']);
+const BOOLEAN_FIELDS = new Set(['watering']);
 
 function fieldLabel(field) {
   return (FIELD_META[field] || {}).label || field;

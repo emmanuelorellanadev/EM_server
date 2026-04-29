@@ -39,28 +39,28 @@ app = Flask(__name__)
 # ---------------------------------------------------------------------------
 
 _FIELD_ICONS = {
-    "temperature":   "🌡️",
-    "humidity":      "💧",
-    "soil_humidity": "🌱",
-    "soil_raw":      "📟",
-    "light":         "☀️",
-    "pressure":      "🌀",
-    "watering":      "🚿",
-    "cooldown":      "⏳",
+    "temperature":          "🌡️",
+    "humidity":             "💧",
+    "soil_humidity":        "🌱",
+    "light":                "☀️",
+    "pressure":             "🌀",
+    "watering":             "🚿",
+    "on_threshold_percent": "🎯",
+    "relay_on_time_s":      "⏱️",
 }
 _FIELD_LABELS = {
-    "temperature":   "Temperatura",
-    "humidity":      "Humedad Ambiental",
-    "soil_humidity": "Humedad de Suelo",
-    "soil_raw":      "ADC Bruto",
-    "light":         "Iluminación",
-    "pressure":      "Presión Atmosférica",
-    "watering":      "Riego Activo",
-    "cooldown":      "En Cooldown",
+    "temperature":          "Temperatura",
+    "humidity":             "Humedad Ambiental",
+    "soil_humidity":        "Humedad de Suelo",
+    "light":                "Iluminación",
+    "pressure":             "Presión Atmosférica",
+    "watering":             "Riego Activo",
+    "on_threshold_percent": "Umbral de Activación (%)",
+    "relay_on_time_s":      "Duración de Riego (s)",
 }
 
 # Fields that represent boolean on/off state (stored as 1.0 / 0.0)
-BOOLEAN_FIELDS = {"watering", "cooldown"}
+BOOLEAN_FIELDS = {"watering"}
 
 
 @app.template_global()

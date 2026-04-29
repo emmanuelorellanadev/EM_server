@@ -159,7 +159,7 @@ mqtt.publish()          ──────────────────�
 
 #### Payload MQTT del ESP8266
 
-El ESP8266 publica en `sensors/esp8266` cada 3 s (configurable):
+El ESP8266 publica en `sensors/esp8266` cada 60 s (configurable):
 
 ```json
 {
@@ -320,7 +320,7 @@ cp esp8266/humedadSueloK8/config.example.h \
 #    Compila y sube
 ```
 
-El ESP8266 publicará automáticamente en `sensors/esp8266` cada 3 s
+El ESP8266 publicará automáticamente en `sensors/esp8266` cada 60 s
 (ajustable con `BACKGROUND_SAMPLE_MS` en `config.h`).
 
 ---

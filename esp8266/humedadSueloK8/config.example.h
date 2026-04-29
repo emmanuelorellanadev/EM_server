@@ -129,7 +129,7 @@
 //
 //   UL al final = "Unsigned Long" literal. Necesario porque RELAY_ON_TIME_MS
 //   puede superar el rango de un int (32767) en instalaciones con goteo lento.
-#define RELAY_ON_TIME_MS   5000UL   // 5 segundos (valor inicial de ejemplo)
+#define RELAY_ON_TIME_MS   1000UL   // 1 segundo por ciclo de riego
 
 // TIEMPO DE ESPERA ENTRE RIEGOS CONSECUTIVOS (cooldown):
 //   Después de regar, el sistema espera este tiempo antes de permitir
@@ -170,7 +170,9 @@
 //   • Poco frecuente (> 30000 ms): respuesta lenta ante cambios de humedad.
 //   • 3000–5000 ms: balance óptimo para monitoreo de humedad de suelo
 //     (la humedad cambia lentamente, no necesita muestreo muy rápido).
-#define BACKGROUND_SAMPLE_MS  3000UL   // 3 segundos entre lecturas
+//   • 60000 ms: una lectura por minuto, útil para invernaderos con
+//     sensores estables y base de datos que no debe saturarse.
+#define BACKGROUND_SAMPLE_MS  60000UL   // 60 segundos entre lecturas
 
 // ================================================================
 // MQTT  —  Comunicación con la Raspberry Pi vía broker

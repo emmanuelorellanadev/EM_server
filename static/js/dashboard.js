@@ -162,6 +162,25 @@ async function sendWaterCommand(btn) {
 }
 
 // ------------------------------------------------------------------ //
+// Load trend chart from history API
+// ------------------------------------------------------------------ //
+
+/**
+ * Fetches the last 50 readings from /api/history, sorts them
+ * chronologically, and renders the trend chart.
+ */
+async function loadTrendChart() {
+  try {
+    const resp = await fetch('/api/history?limit=50');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    // Sort oldest-first so time flows left→right on the x-axis
+    data.sort((a, b) => a.recorded_at.localeCompare(b.recorded_at));
+    initTrendChart(data);
+  } catch (_) { /* network error – ignore */ }
+}
+
+// ------------------------------------------------------------------ //
 // Auto-refresh every 30 seconds
 // ------------------------------------------------------------------ //
 setInterval(async () => {

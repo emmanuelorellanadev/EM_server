@@ -172,12 +172,17 @@ async function sendWaterCommand(btn) {
 async function loadTrendChart() {
   try {
     const resp = await fetch('/api/history?limit=50');
-    if (!resp.ok) return;
+    if (!resp.ok) {
+      console.error('loadTrendChart: API returned', resp.status);
+      return;
+    }
     const data = await resp.json();
     // Sort oldest-first so time flows left→right on the x-axis
     data.sort((a, b) => a.recorded_at.localeCompare(b.recorded_at));
     initTrendChart(data);
-  } catch (_) { /* network error – ignore */ }
+  } catch (err) {
+    console.error('loadTrendChart: network error –', err);
+  }
 }
 
 // ------------------------------------------------------------------ //

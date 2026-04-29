@@ -165,18 +165,29 @@ async function sendWaterCommand(btn) {
 // Load trend chart from history API
 // ------------------------------------------------------------------ //
 
+// Only these two fields are shown in the trend chart.
+const CHART_FIELDS = ['soil_humidity', 'on_threshold_percent'];
+
 /**
- * Fetches the last 50 readings from /api/history, sorts them
- * chronologically, and renders the trend chart.
+ * Fetches the last 50 readings for each chart field separately so that the
+ * most-recent value per field always matches what is shown on the sensor
+ * cards, then renders the trend chart.
  */
 async function loadTrendChart() {
   try {
-    const resp = await fetch('/api/history?limit=50');
-    if (!resp.ok) {
-      console.error('loadTrendChart: API returned', resp.status);
-      return;
-    }
-    const data = await resp.json();
+    const responses = await Promise.all(
+      CHART_FIELDS.map(f => fetch(`/api/history?field=${f}&limit=50`))
+    );
+    const arrays = await Promise.all(
+      responses.map((r, i) => {
+        if (!r.ok) {
+          console.error(`loadTrendChart: API returned ${r.status} for ${CHART_FIELDS[i]}`);
+          return [];
+        }
+        return r.json();
+      })
+    );
+    const data = arrays.flat();
     // Sort oldest-first so time flows left→right on the x-axis
     data.sort((a, b) => a.recorded_at.localeCompare(b.recorded_at));
     initTrendChart(data);

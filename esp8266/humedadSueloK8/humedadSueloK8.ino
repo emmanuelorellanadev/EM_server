@@ -62,8 +62,8 @@
     PUBLICACIÓN (ESP8266 → Raspberry Pi):
       Tópico : sensors/esp8266
       Cada   : BACKGROUND_SAMPLE_MS milisegundos
-      Formato: {"raw":512,"percent":65.3,"state":"WET",
-                "watering":false,"cooldown":false}
+      Formato: {"percent":65.3,"state":"WET","watering":false,
+                "on_threshold_percent":35,"relay_on_time_s":1.0}
 
     SUSCRIPCIÓN (Raspberry Pi → ESP8266):
       Tópico  : commands/esp8266
@@ -401,12 +401,12 @@ void handleJson() {
 
   // Construir el JSON manualmente (sin librería externa para ahorrar RAM)
   String json = "{";
-  json += "\"raw\":"              + String(lastRaw)                                + ",";
-  json += "\"percent\":"          + String(lastPercent, 1)                         + ",";
-  json += "\"watering\":"         + String(relayState == WATERING ? "true":"false") + ",";
-  json += "\"cooldown\":"         + String(relayState == COOLDOWN ? "true":"false") + ",";
-  json += "\"state\":\""          + estado                                         + "\",";
-  json += "\"last_watered_sec\":" + String(secsAgo);
+  json += "\"percent\":"              + String(lastPercent, 1)                         + ",";
+  json += "\"watering\":"             + String(relayState == WATERING ? "true":"false") + ",";
+  json += "\"state\":\""              + estado                                         + "\",";
+  json += "\"last_watered_sec\":"     + String(secsAgo)                                + ",";
+  json += "\"on_threshold_percent\":" + String(ON_THRESHOLD_PERCENT)                   + ",";
+  json += "\"relay_on_time_s\":"      + String((float)RELAY_ON_TIME_MS / 1000.0f, 1);
   json += "}";
 
   // "application/json" es el Content-Type estándar para APIs REST
@@ -548,11 +548,11 @@ bool reconnectMQTT() {
 //
 // FORMATO DEL JSON PUBLICADO:
 //   {
-//     "raw"      : 450,       ← valor crudo del ADC (0–1023)
-//     "percent"  : 51.5,      ← humedad en % (0.0–100.0)
-//     "watering" : false,     ← true si la válvula está abierta ahora
-//     "cooldown" : false,     ← true si está en período de espera
-//     "state"    : "WET"      ← "DRY", "WET", "WATERING" o "COOLDOWN"
+//     "percent"             : 51.5,  ← humedad en % (0.0–100.0)
+//     "watering"            : false, ← true si la válvula está abierta ahora
+//     "state"               : "WET", ← "DRY", "WET", "WATERING" o "COOLDOWN"
+//     "on_threshold_percent": 35,    ← umbral (%) que activa el relé
+//     "relay_on_time_s"     : 1.0    ← duración de cada ciclo de riego en segundos
 //   }
 //
 // ¿QUÉ ES QoS EN MQTT?
@@ -576,11 +576,11 @@ void publicarMQTT() {
   // c_str() convierte String de Arduino a cadena C (const char*) que
   // necesita mqtt.publish()
   String json = "{";
-  json += "\"raw\":"       + String(lastRaw)                                + ",";
-  json += "\"percent\":"   + String(lastPercent, 1)                         + ",";
-  json += "\"watering\":"  + String(relayState == WATERING ? "true":"false") + ",";
-  json += "\"cooldown\":"  + String(relayState == COOLDOWN ? "true":"false") + ",";
-  json += "\"state\":\""   + estado                                         + "\"";
+  json += "\"percent\":"              + String(lastPercent, 1)                         + ",";
+  json += "\"watering\":"             + String(relayState == WATERING ? "true":"false") + ",";
+  json += "\"state\":\""              + estado                                         + "\",";
+  json += "\"on_threshold_percent\":" + String(ON_THRESHOLD_PERCENT)                   + ",";
+  json += "\"relay_on_time_s\":"      + String((float)RELAY_ON_TIME_MS / 1000.0f, 1);
   json += "}";
 
   // mqtt.publish(topico, mensaje) retorna true si el mensaje fue encolado OK

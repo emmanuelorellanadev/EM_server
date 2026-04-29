@@ -121,9 +121,9 @@ El sensor K8/C11 es de tipo **resistivo/capacitivo** y tiene dos salidas:
 
 El firmware convierte el ADC crudo a porcentaje de humedad:
 ```
-humedad_% = (ADC_SECO - raw) / (ADC_SECO - ADC_MOJADO) × 100
+humedad_% = (RAW_DRY - raw) / (RAW_DRY - RAW_WET) × 100
 ```
-Ajusta `ADC_SECO` y `ADC_MOJADO` en `config.h` con mediciones reales.
+Ajusta `RAW_DRY` y `RAW_WET` en `config.h` con mediciones reales.
 
 ---
 
@@ -159,13 +159,13 @@ mqtt.publish()          ──────────────────�
 
 #### Payload MQTT del ESP8266
 
-El ESP8266 publica en `sensors/esp8266` cada 30 s (configurable):
+El ESP8266 publica en `sensors/esp8266` cada 60 s (configurable):
 
 ```json
 {
   "raw":      512,      ← lectura ADC cruda (0-1023)
   "percent":  42.3,     ← humedad de suelo (0% = seco, 100% = mojado)
-  "state":    "MOIST",  ← "DRY" | "MOIST" | "WET"
+  "state":    "WET",    ← "DRY" | "WET" | "WATERING" | "COOLDOWN"
   "watering": false,    ← ¿está el riego activo?
   "cooldown": false     ← ¿en período de espera post-riego?
 }
@@ -320,7 +320,7 @@ cp esp8266/humedadSueloK8/config.example.h \
 #    Compila y sube
 ```
 
-El ESP8266 publicará automáticamente en `sensors/esp8266` cada 30 s
+El ESP8266 publicará automáticamente en `sensors/esp8266` cada 60 s
 (ajustable con `BACKGROUND_SAMPLE_MS` en `config.h`).
 
 ---

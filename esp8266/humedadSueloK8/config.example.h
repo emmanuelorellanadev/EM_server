@@ -1,118 +1,251 @@
+#pragma once
 /*
-  config.example.h
+  config.example.h — Plantilla de configuración para humedadSueloK8
   ──────────────────────────────────────────────────────────────────
-  Plantilla de configuración para humedadSueloK8.ino.
+  INSTRUCCIONES:
+    1. Copia este archivo: cp config.example.h config.h
+    2. Edita config.h con tus valores reales (SSID, contraseña, IP, etc.).
+    3. NUNCA subas config.h al repositorio — ya está en .gitignore para
+       proteger tus credenciales y tu red Wi-Fi.
 
-  TECNOLOGÍA: Las constantes definidas con #define son procesadas por
-  el preprocesador de C++ ANTES de la compilación. No ocupan RAM en el
-  microcontrolador; el compilador sustituye cada nombre por su valor
-  literalmente en el código fuente. Esto es ideal para configuración
-  de hardware que no cambia en tiempo de ejecución.
+  Este archivo sirve como PLANTILLA pública con valores de ejemplo.
+  Todo está comentado didácticamente para que puedas ajustarlo sin
+  necesidad de entender el código .ino principal.
 
-  USO:
-    1. Copia este archivo como  humedadSueloK8/config.h
-    2. Rellena los valores de tu red Wi-Fi y broker MQTT.
-    3. Ajusta los valores de calibración del sensor.
-    4. NO subas config.h al repositorio (ya está en .gitignore).
-  ──────────────────────────────────────────────────────────────────
+  #pragma once evita que este archivo se incluya más de una vez si
+  por accidente se referencia desde varios lugares (include guard).
 */
 
-// #pragma once — directiva que le indica al compilador que incluya
-// este archivo solo una vez aunque se referencie varias veces.
-// Equivale a los guardias de inclusión (#ifndef/#define/#endif).
-#pragma once
+// ================================================================
+// Wi-Fi  —  Credenciales de tu red local
+// ================================================================
+// El ESP8266 se conecta a tu red doméstica/empresarial por Wi-Fi.
+// Reemplaza los valores entre comillas con los de tu red real.
+// SSID: nombre de la red (el que aparece al buscar Wi-Fi en tu celular)
+// PASS: contraseña de la red (distingue mayúsculas/minúsculas)
+#define WIFI_SSID "TU_RED_WIFI"      // Nombre de tu red (SSID)
+#define WIFI_PASS "TU_CONTRASENA"    // Contraseña de tu red
 
-// ── Wi-Fi ─────────────────────────────────────────────────────────
-// El ESP8266 integra un módulo Wi-Fi 802.11 b/g/n de 2.4 GHz.
-// La librería ESP8266WiFi abstrae la conexión: basta con SSID y
-// contraseña para unirse a una red WPA2 doméstica.
-#define WIFI_SSID      "TU_SSID_AQUI"
-#define WIFI_PASSWORD  "TU_CONTRASEÑA_AQUI"
+// ================================================================
+// Pines  —  Conexión física ESP8266 ↔ componentes
+// ================================================================
+// IMPORTANTE: Usamos la numeración GPIO real, NO la etiqueta impresa
+// en la placa (D1, D5, etc.). La tabla de conversión es:
+//   D0=16  D1=5  D2=4  D3=0  D4=2  D5=14  D6=12  D7=13  D8=15
+//
+// Para identificar tus pines: busca "NodeMCU V3 pinout" en imágenes.
 
-// ── MQTT ──────────────────────────────────────────────────────────
+// ── Salida digital del sensor K8/C11 ─────────────────────────────
+// El sensor tiene dos salidas:
+//   AO (Analog Output)  → conectar a A0 (único pin ADC del ESP8266)
+//   DO (Digital Output) → conectar aquí (PIN_DO)
+// DO genera HIGH/LOW según un potenciómetro de umbral en el sensor.
+// En este firmware solo usamos DO de forma informativa; el control
+// real del riego viene de la lectura analógica (más precisa).
+// D5 en NodeMCU V3 = GPIO 14
+#define PIN_DO 14
+
+// ── Pin de control del módulo relé ───────────────────────────────
+// El relé es un interruptor electromecánico controlado eléctricamente.
+// Permite que el ESP8266 (3.3 V, señales débiles) controle cargas de
+// alto voltaje (12 V DC de la electroválvula) de forma segura.
+//
+// Este módulo relé es ACTIVE-HIGH:
+//   digitalWrite(PIN_RELAY, HIGH) → bobina energizada → contacto NO CIERRA
+//                                 → electroválvula recibe 12 V → AGUA FLUYE
+//   digitalWrite(PIN_RELAY, LOW)  → bobina apagada → contacto NO ABRE
+//                                 → electroválvula sin corriente → SIN AGUA
+//                                 → ESTADO SEGURO AL ARRANQUE
+//
+// D1 en NodeMCU V3 = GPIO 5
+#define PIN_RELAY 5
+
+// ── LED integrado del NodeMCU ─────────────────────────────────────
+// NodeMCU tiene un LED azul/verde soldado en la placa conectado al
+// GPIO2 (D4). Es ACTIVE-LOW, lo que significa lógica invertida:
+//   digitalWrite(PIN_LED, LOW)  → LED ENCENDIDO (indica que está regando)
+//   digitalWrite(PIN_LED, HIGH) → LED APAGADO
+// LED_BUILTIN es una constante predefinida que apunta al pin correcto
+// según la placa seleccionada en Arduino IDE.
+#define PIN_LED LED_BUILTIN
+
+// ================================================================
+// Calibración ADC  ← ¡AJUSTA ESTO SEGÚN TU SENSOR ESPECÍFICO!
+// ================================================================
+// El ADC (Convertidor Analógico-Digital) del ESP8266 lee voltajes
+// en el pin A0 y los convierte a un número entero entre 0 y 1023.
+//
+// El sensor de humedad genera un voltaje que varía según la humedad:
+//   Suelo SECO  → alta resistencia → más voltaje → ADC da valor ALTO (~571)
+//   Suelo HÚMEDO → baja resistencia → menos voltaje → ADC da valor BAJO (~336)
+//
+// PROCEDIMIENTO DE CALIBRACIÓN (hazlo una sola vez):
+//   1. Conecta el sensor al ESP8266 y abre el Monitor Serie (115200 baud).
+//   2. Pon el sensor en el AIRE (completamente seco): anota el valor Raw.
+//      → Ese valor es tu RAW_DRY.
+//   3. Sumerge el sensor en un vaso de AGUA: anota el valor Raw.
+//      → Ese valor es tu RAW_WET.
+//   4. Reemplaza los valores de ejemplo abajo con los tuyos.
+//
+// ⚠ Los valores aquí son de EJEMPLO con un K8/C11 genérico.
+//   Tu sensor puede dar valores diferentes. Usar valores incorrectos
+//   produce lecturas erróneas y puede causar riegos indeseados.
+#define RAW_DRY 571   // ADC cuando el sensor está completamente seco (en aire)
+#define RAW_WET 336   // ADC cuando el sensor está completamente húmedo (en agua)
+
+// ================================================================
+// Umbrales de humedad  (porcentaje 0–100 %)
+// ================================================================
+// Definen cuándo el sistema considera que el suelo está "seco" y
+// necesita riego, y cuándo está "húmedo" y no necesita nada.
+
+// UMBRAL DE ACTIVACIÓN DEL RIEGO:
+//   Si humedad < ON_THRESHOLD_PERCENT → el suelo está SECO → activar válvula.
+//   Ejemplo: con 35, si la humedad cae a 34% → inicia el riego.
+//   ⚠ Un valor demasiado bajo = riega poco (la planta puede secarse).
+//     Un valor demasiado alto = riega demasiado (puede pudrir las raíces).
+#define ON_THRESHOLD_PERCENT  35
+
+// UMBRAL INFORMATIVO SUPERIOR:
+//   Se usa solo para mostrar el estado "HUMEDO" en la página web y serial.
+//   NO controla el relé directamente (el riego siempre dura RELAY_ON_TIME_MS).
+//   Ejemplo: con 45, si la humedad es 46% → muestra "HUMEDO" en la web.
+#define OFF_THRESHOLD_PERCENT 45
+
+// ================================================================
+// Tiempos del riego  —  Duración y espera entre ciclos
+// ================================================================
+
+// DURACIÓN DE CADA CICLO DE RIEGO (en milisegundos):
+//   Tiempo que permanece ABIERTA la electroválvula en cada ciclo.
+//   El sistema cierra la válvula automáticamente al cumplirse este tiempo.
+//
+//   Cómo calcular el valor correcto para tu instalación:
+//     1. Mide cuántos litros entrega tu gotero/electroválvula por segundo.
+//     2. Estima cuánta agua necesita tu maceta/zona de riego por ciclo.
+//     3. tiempo_ms = (agua_litros / caudal_litros_por_segundo) × 1000
+//
+//   Ejemplo: 0.2 L/s de caudal, 1 L por ciclo → 1/0.2 × 1000 = 5000 ms
+//
+//   UL al final = "Unsigned Long" literal. Necesario porque RELAY_ON_TIME_MS
+//   puede superar el rango de un int (32767) en instalaciones con goteo lento.
+#define RELAY_ON_TIME_MS   1000UL   // 1 segundo por ciclo de riego
+
+// TIEMPO DE ESPERA ENTRE RIEGOS CONSECUTIVOS (cooldown):
+//   Después de regar, el sistema espera este tiempo antes de permitir
+//   otro ciclo de riego aunque el sensor siga detectando suelo seco.
+//   Esto es necesario porque:
+//   • El suelo tarda en absorber el agua y el sensor en detectar el cambio.
+//   • Sin cooldown, el sistema podría regar en bucle continuo.
+//   Recomendación: al menos 2–5 veces RELAY_ON_TIME_MS para suelos normales.
+#define COOLDOWN_MS       15000UL   // 15 segundos (ajustar según tipo de suelo)
+
+// ================================================================
+// Lectura ADC  —  Parámetros de estabilidad de señal
+// ================================================================
+// El ADC del ESP8266 no es de alta precisión y tiene ruido eléctrico.
+// Promediar varias muestras mejora significativamente la estabilidad
+// de las lecturas sin necesidad de hardware adicional.
+
+// Cuántas lecturas se promedian en cada ciclo de muestreo.
+// Más muestras = más estable pero más lento. 20 es un buen balance.
+// Con 20 muestras × 5 ms = 100 ms por lectura completa.
+#define ANALOG_SAMPLES   20
+
+// Tiempo de espera entre lecturas consecutivas del ADC (en ms).
+// Da tiempo al circuito de muestreo interno del ADC para recargarse.
+// Sin esta pausa, las lecturas sucesivas pueden ser casi idénticas
+// porque el capacitor interno aún no se ha cargado completamente.
+#define ANALOG_DELAY_MS   5
+
+// ================================================================
+// Muestreo en segundo plano  —  Frecuencia de lectura del sensor
+// ================================================================
+// Cada cuántos milisegundos se lee el sensor, se actualiza el control
+// de riego y se publican los datos por MQTT.
+//
+// Consideraciones para elegir el valor:
+//   • Muy frecuente (< 1000 ms): más datos pero mayor consumo de CPU/red.
+//     Puede saturar la base de datos de la Raspberry Pi innecesariamente.
+//   • Poco frecuente (> 30000 ms): respuesta lenta ante cambios de humedad.
+//   • 3000–5000 ms: balance óptimo para monitoreo de humedad de suelo
+//     (la humedad cambia lentamente, no necesita muestreo muy rápido).
+//   • 60000 ms: una lectura por minuto, útil para invernaderos con
+//     sensores estables y base de datos que no debe saturarse.
+#define BACKGROUND_SAMPLE_MS  60000UL   // 60 segundos entre lecturas
+
+// ================================================================
+// MQTT  —  Comunicación con la Raspberry Pi vía broker
+// ================================================================
 // MQTT (Message Queuing Telemetry Transport) es un protocolo de
 // mensajería ligero basado en el patrón publicar/suscribir (pub/sub).
 // Funciona sobre TCP/IP con un servidor central llamado "broker"
 // (en este proyecto: Mosquitto corriendo en la Raspberry Pi).
 //
-// Ventajas de MQTT para IoT:
+// VENTAJAS DE MQTT PARA IoT:
 //   • Muy bajo consumo de ancho de banda (cabecera mínima de 2 bytes)
 //   • Tolerante a redes inestables (reconexión automática)
 //   • Desacopla productores y consumidores: el ESP8266 publica datos
-//     sin saber quién los lee; la Raspberry Pi los recibe sin saber
-//     desde cuántos dispositivos provienen.
+//     sin saber quién los lee; la RPi los recibe sin saber cuántos
+//     dispositivos los generan.
 //
-// Conceptos clave:
-//   BROKER  : servidor central (Mosquitto en la Raspberry Pi)
-//   TÓPICO  : cadena jerárquica que identifica un canal de mensajes
-//             (p. ej. "sensors/esp8266", "commands/esp8266")
-//   QoS     : nivel de calidad de servicio (0=fire-and-forget, 1=al-menos-una-vez)
-//   CLIENTE : cualquier dispositivo que se conecta al broker
+// CÓMO FUNCIONA EN ESTE PROYECTO:
 //
-// Deja MQTT_SERVER vacío ("") para deshabilitar MQTT completamente.
-#define MQTT_SERVER    "192.168.1.100"   // IP de la Raspberry Pi (broker)
-#define MQTT_PORT      1883              // puerto TCP estándar de MQTT sin TLS
-#define MQTT_USER      ""               // vacío = sin autenticación
-#define MQTT_PASSWORD  ""
-// El client_id identifica de forma única a este dispositivo ante el broker.
-// Si dos clientes usan el mismo ID, el broker desconectará al anterior.
-#define MQTT_CLIENT_ID "esp8266-invernadero"
+//   PUBLICACIÓN (ESP8266 → Raspberry Pi):
+//     El ESP8266 envía lecturas del sensor cada BACKGROUND_SAMPLE_MS.
+//     Tópico: sensors/esp8266
+//     Ejemplo: {"raw":450,"percent":51.5,"state":"WET",
+//               "watering":false,"cooldown":false}
+//     La Raspberry Pi (mqtt_client.py) escucha "sensors/#" y guarda
+//     cada mensaje en la base de datos SQLite.
+//
+//   SUSCRIPCIÓN (Raspberry Pi → ESP8266):
+//     El ESP8266 escucha comandos de riego remoto.
+//     Tópico: commands/esp8266
+//     Comando: {"action":"water"}
+//     Efecto: activa el relé y enciende el LED, igual que si el
+//             sensor detectara suelo seco localmente.
+//
+// GLOSARIO:
+//   BROKER    : servidor central que recibe y distribuye mensajes
+//   TÓPICO    : nombre jerárquico del canal (ej: "sensors/esp8266")
+//   QoS       : calidad de servicio (0 = sin confirmación, 1 = con confirmación)
+//   CLIENT_ID : nombre único de este dispositivo ante el broker
+//
+// ¿CÓMO DESHABILITAR MQTT?
+//   Deja MQTT_SERVER vacío: #define MQTT_SERVER ""
+//   El firmware omitirá toda la lógica MQTT automáticamente.
+//
+// Instala la librería "PubSubClient" de Nick O'Leary desde el
+// Library Manager de Arduino IDE antes de compilar.
 
-// Tópico de PUBLICACIÓN: el ESP8266 envía lecturas de sensor aquí.
-// El servidor EM_server escucha "sensors/#" y almacena los datos.
-#define MQTT_TOPICO     "sensors/esp8266"
+// IP del broker MQTT (tu Raspberry Pi en la red local).
+// ⚠ Cambia "192.168.1.2" por la IP real de tu Raspberry Pi.
+//   Puedes verla con: hostname -I  (en la terminal de la RPi)
+//   Dejar "" para deshabilitar MQTT completamente.
+#define MQTT_SERVER      "192.168.1.2"         // IP de la Raspberry Pi (broker)
+
+// Puerto TCP del broker. 1883 es el estándar MQTT sin cifrado TLS.
+// Si tu broker usa TLS (cifrado), el puerto es generalmente 8883.
+#define MQTT_PORT        1883                   // Puerto TCP estándar sin TLS
+
+// Identificador único de ESTE dispositivo ante el broker.
+// Si dos dispositivos usan el mismo CLIENT_ID, el broker desconecta
+// al anterior. Cambia este nombre si tienes varios ESP8266.
+#define MQTT_CLIENT_ID   "esp8266-invernadero" // ID único por dispositivo
+
+// Tópico de PUBLICACIÓN: el ESP8266 envía sus datos aquí.
+// La Raspberry Pi (mqtt_client.py) está suscrita a "sensors/#"
+// para recibir datos de todos los dispositivos del invernadero.
+#define MQTT_TOPICO      "sensors/esp8266"
 
 // Tópico de SUSCRIPCIÓN: el ESP8266 escucha comandos aquí.
-// La Raspberry Pi (EM_server) publica {"action":"water"} para activar el riego.
-// Esto permite el control REMOTO del riego desde el dashboard web.
-#define MQTT_TOPICO_CMD "commands/esp8266"
+// El dashboard de la Raspberry Pi publica {"action":"water"} en
+// este tópico para activar el riego de forma remota.
+#define MQTT_TOPICO_CMD  "commands/esp8266"
 
-// ── Pines de hardware ─────────────────────────────────────────────
-// El ESP8266 NodeMCU V3 etiqueta los pines con nombres "D0"–"D8"
-// que corresponden a números GPIO internos. Usamos los números GPIO
-// en el código porque Arduino los interpreta directamente.
-//
-//   A0       → salida analógica del sensor K8/C11
-//              ¡ÚNICO pin ADC del ESP8266! Rango: 0-1023 (10 bits)
-//              Corresponde al ADC interno con divisor de tensión 0-3.3 V
-//   D5/GPIO14 → salida digital (DO) del sensor K8/C11
-//              (umbral configurable con el potenciómetro del módulo)
-//   D1/GPIO5  → señal de control del módulo relé
-#define PIN_SENSOR_DO   14   // D5 en la serigrafía del NodeMCU V3
-#define PIN_RELAY        5   // D1 en la serigrafía del NodeMCU V3
-
-// ── Calibración del sensor analógico ─────────────────────────────
-// El sensor K8/C11 es de tipo resistivo: su resistencia cambia según
-// la humedad del suelo. El ESP8266 lee esa resistencia a través del
-// ADC (Convertidor Analógico-Digital).
-//
-// Relación ADC ↔ humedad (INVERTIDA porque la resistencia cae al mojarse):
-//   Suelo SECO    → resistencia alta → tensión alta → ADC ≈ 1023
-//   Suelo MOJADO  → resistencia baja → tensión baja → ADC ≈ 300
-//
-// Para calibrar:
-//   1. Inserta el sensor en suelo completamente seco → anota el ADC → ADC_SECO
-//   2. Introduce el sensor en agua hasta el nivel máximo → anota el ADC → ADC_MOJADO
-#define ADC_SECO    1023   // ← ajusta con tu medición real
-#define ADC_MOJADO   300   // ← ajusta con tu medición real
-
-// ── Umbrales de humedad (%) ───────────────────────────────────────
-// Con estos umbrales el firmware decide si el suelo necesita riego:
-//   humedad < UMBRAL_RIEGO → suelo demasiado seco → INICIAR riego automático
-//   humedad ≥ UMBRAL_CORTE → suelo suficientemente húmedo → DETENER riego
-//
-// La brecha entre ambos valores (histéresis) evita que el relé
-// cicle encendiéndose y apagándose rápidamente cuando la humedad
-// está justo en el umbral.
-#define UMBRAL_RIEGO   30    // % — por debajo → iniciar riego
-#define UMBRAL_CORTE   60    // % — por encima → detener riego
-
-// ── Tiempos (milisegundos) ────────────────────────────────────────
-// Todos los tiempos son en milisegundos para poder usar millis()
-// (contador de tiempo de Arduino) sin conversiones.
-// El sufijo UL (Unsigned Long) es necesario porque millis() devuelve
-// un unsigned long y la comparación debe ser del mismo tipo para
-// evitar desbordamiento a los ~49 días de funcionamiento continuo.
-#define DURACION_RIEGO_MS    10000UL  // 10 s  — tiempo máximo de riego por ciclo
-#define COOLDOWN_MS         300000UL  // 5 min — espera mínima entre riegos consecutivos
-#define BACKGROUND_SAMPLE_MS  30000UL  // 30 s  — intervalo de muestreo + publicación MQTT
+// Credenciales de autenticación del broker MQTT.
+// Dejar ambas vacías ("") si el broker Mosquitto no requiere usuario/contraseña.
+// Para configurar autenticación en Mosquitto: ver mosquitto_passwd.
+#define MQTT_USER        ""    // Usuario MQTT (dejar "" si no hay autenticación)
+#define MQTT_PASS_BROKER ""    // Contraseña MQTT (dejar "" si no hay autenticación)

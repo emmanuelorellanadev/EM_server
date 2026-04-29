@@ -1,731 +1,730 @@
 /*
   humedadSueloK8.ino
-  ══════════════════════════════════════════════════════════════════════════════
-  Monitor de humedad de suelo para invernadero.
+  ──────────────────────────────────────────────────────────────────
+  Monitor de humedad de suelo con servidor web, riego temporizado
+  y comunicación bidireccional vía MQTT.
 
-  FUNCIONALIDADES
-  ───────────────
-  • Lee el sensor K8/C11 por el ADC y convierte la lectura a % de humedad.
-  • Controla una electroválvula a través de un módulo relé para riego automático.
-  • Expone un servidor web HTTP en el puerto 80 para consultar el estado local.
-  • PUBLICA datos de sensor vía MQTT hacia la Raspberry Pi (EM_server).
-  • SUSCRIBE a un tópico MQTT de comandos: la Raspberry Pi puede ordenar un
-    ciclo de riego manual enviando {"action":"water"} al tópico definido
-    en MQTT_TOPICO_CMD (config.h).
+  ¿QUÉ HACE ESTE FIRMWARE?
+  ─────────────────────────
+  1. Lee continuamente un sensor de humedad de suelo (señal analógica).
+  2. Controla automáticamente un relé (válvula de riego) cuando el
+     suelo está demasiado seco.
+  3. Sirve una página web local para monitorear el estado en tiempo real.
+  4. Publica los datos del sensor a una Raspberry Pi vía MQTT (protocolo
+     de mensajería ligero para IoT).
+  5. Recibe comandos de riego remotos desde la Raspberry Pi vía MQTT.
 
-  HARDWARE
-  ────────
-  • ESP8266 NodeMCU V3   (CPU Tensilica L106 @ 80 MHz, 80 kB RAM, 4 MB Flash)
-  • Sensor K8/C11         (resistivo: AO → A0 analógico, DO → D5 digital)
-  • Módulo relé 5 V       (active-HIGH en D6/GPIO12)
-  • Electroválvula 12 V DC (NC/COM del relé + diodo flyback 1N4007)
+  HARDWARE NECESARIO:
+  ────────────────────
+    • ESP8266 NodeMCU V3
+        Seleccionar en Arduino IDE: "NodeMCU 1.0 (ESP-12E Module)"
+        Microcontrolador con Wi-Fi integrado. Tiene un único pin ADC (A0)
+        que lee voltajes entre 0 V y 1 V (internamente con divisor de voltaje
+        se puede leer hasta 3.3 V según la placa).
 
-  CÓMO COMPILAR Y SUBIR
-  ──────────────────────
-  1. Copia config.example.h → config.h y edita tus valores.
-  2. En Arduino IDE: Herramientas → Placa → "NodeMCU 1.0 (ESP-12E Module)"
-  3. Instala "PubSubClient" de Nick O'Leary (Library Manager).
-  4. Compila y sube.
+    • Sensor capacitivo/resistivo K8 o C11
+        AO (Analog Output) → A0  : señal analógica de 0–1023 según humedad
+        DO (Digital Output) → D5 : salida digital (umbral fijo, no usado en control)
+        VCC → 3.3 V o 5 V según modelo
+        GND → GND
 
-  PROTOCOLO MQTT — FLUJO DE DATOS
-  ────────────────────────────────
-  Publicación (ESP8266 → Raspberry Pi):
-    Tópico : MQTT_TOPICO   (por defecto "sensors/esp8266")
-    Payload: {"raw":512,"percent":42.3,"state":"MOIST","watering":false,"cooldown":false}
-    Cadencia: cada BACKGROUND_SAMPLE_MS milisegundos
+    • Módulo relé 5 V
+        IN  → D1 (GPIO 5)  : señal de control desde el ESP8266
+        VCC → 5 V externo  : alimentación de la bobina del relé
+        GND → GND compartido con el ESP8266
+        Contactos NO/COM   : conectados a la electroválvula
+        IMPORTANTE: Este módulo es active-HIGH (HIGH activa el relé).
 
-  Suscripción (Raspberry Pi → ESP8266):
-    Tópico : MQTT_TOPICO_CMD  (por defecto "commands/esp8266")
-    Payload: {"action":"water"}
-    Efecto : activa un ciclo de riego manual por DURACION_RIEGO_MS ms.
-             A diferencia del riego automático, el manual cancela el cooldown
-             activo si lo hubiera, permitiendo al usuario forzar el riego.
+    • Electroválvula 12 V DC
+        Conectar en serie con una fuente de 12 V a través de los contactos
+        NO (Normally Open) y COM del relé.
+        ⚠ Añadir un diodo flyback en paralelo con la electroválvula para
+          proteger el relé de los picos de voltaje al desactivar la bobina.
 
-  MAPEO EN EL SERVIDOR EM_server
-  ────────────────────────────────
-    "percent" → campo "soil_humidity"   (configurado en config.json/field_mappings)
-    "raw"     → campo "soil_raw"
-  ══════════════════════════════════════════════════════════════════════════════
+  CÓMO COMPILAR Y SUBIR:
+  ───────────────────────
+    1. Copia humedadSueloK8/config.example.h → humedadSueloK8/config.h
+    2. Edita config.h con tu SSID, contraseña Wi-Fi, calibración del sensor
+       y datos del broker MQTT (IP de la Raspberry Pi).
+    3. En Arduino IDE → Herramientas → Gestor de librerías:
+         Instala "PubSubClient" de Nick O'Leary (v2.8 o superior).
+    4. Selecciona placa "NodeMCU 1.0 (ESP-12E Module)" y compila/sube.
+
+  ENDPOINTS DEL SERVIDOR WEB LOCAL:
+  ────────────────────────────────────
+    GET /       → Página HTML amigable con estado actual del sistema.
+                  Abrir en el navegador con la IP que muestra el Monitor Serie.
+    GET /json   → Respuesta JSON con todos los datos. Útil para dashboards
+                  o integrar con otros sistemas sin necesidad de MQTT.
+
+  COMUNICACIÓN MQTT (pub/sub):
+  ──────────────────────────────
+    PUBLICACIÓN (ESP8266 → Raspberry Pi):
+      Tópico : sensors/esp8266
+      Cada   : BACKGROUND_SAMPLE_MS milisegundos
+      Formato: {"raw":512,"percent":65.3,"state":"WET",
+                "watering":false,"cooldown":false}
+
+    SUSCRIPCIÓN (Raspberry Pi → ESP8266):
+      Tópico  : commands/esp8266
+      Comando : {"action":"water"}
+      Efecto  : activa el riego remotamente (igual que si el sensor detectara suelo seco)
+
+    Si MQTT_SERVER está vacío ("") en config.h, se omite toda la lógica
+    MQTT y el firmware funciona solo con servidor web y control local.
+  ──────────────────────────────────────────────────────────────────
 */
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CABECERAS (HEADERS) — Inclusión de librerías
-// ─────────────────────────────────────────────────────────────────────────────
+// ================================================================
+// LIBRERÍAS
+// ================================================================
+// #include carga código externo necesario para el firmware.
+// Las librerías de sistema van entre < > y las propias entre " ".
 
-// config.h contiene las constantes de configuración (Wi-Fi, MQTT, pines…).
-// Al usar comillas en lugar de <>, el compilador busca el archivo en el mismo
-// directorio que el sketch en vez de en los directorios del sistema.
-#include "config.h"
+#include <ESP8266WiFi.h>      // Maneja la conexión Wi-Fi del ESP8266.
+                               // Permite conectarse a una red, obtener IP, etc.
+#include <ESP8266WebServer.h>  // Implementa un servidor HTTP minimalista.
+                               // Con él el ESP8266 puede responder a peticiones
+                               // GET desde un navegador web.
+#include <PubSubClient.h>      // Librería MQTT de Nick O'Leary.
+                               // Permite publicar mensajes y suscribirse a tópicos
+                               // en un broker MQTT (p. ej. Mosquitto en la RPi).
+#include "config.h"            // Archivo de configuración PERSONAL (no subir a git).
+                               // Contiene: SSID, contraseña Wi-Fi, pines, umbrales,
+                               // tiempos y parámetros MQTT. Créalo copiando
+                               // config.example.h y editando con tus valores.
 
-// ESP8266WiFi.h — librería Wi-Fi del SDK del ESP8266.
-//   Proporciona la clase WiFi (objeto global estático) con métodos para:
-//     WiFi.begin(ssid, pass)      → iniciar conexión
-//     WiFi.status()               → comprobar estado (WL_CONNECTED, etc.)
-//     WiFi.localIP()              → obtener IP asignada por DHCP
-//   La comunicación real la realiza el coprocesador Wi-Fi del ESP8266 (ESP-07S)
-//   en segundo plano mientras el código principal ejecuta el loop().
-#include <ESP8266WiFi.h>
+// ================================================================
+// OBJETOS GLOBALES
+// ================================================================
 
-// ESP8266WebServer.h — servidor HTTP integrado (single-threaded, no-blocking).
-//   Permite registrar "handlers" (funciones callback) para rutas HTTP:
-//     server.on("/ruta", handlerFn)  → asocia URL con función
-//     server.handleClient()          → procesa peticiones pendientes (llamar en loop)
-//   El servidor acepta una conexión a la vez; es suficiente para un invernadero.
-#include <ESP8266WebServer.h>
-
-// PubSubClient.h — cliente MQTT para Arduino/ESP8266.
-//   Autor: Nick O'Leary (Knolleary). Implementa MQTT v3.1.1 sobre TCP.
-//   Patrón de uso:
-//     mqttClient.setServer(host, port)     → configura el broker
-//     mqttClient.setCallback(fn)           → función llamada al recibir un mensaje
-//     mqttClient.connect(clientId)         → conecta al broker
-//     mqttClient.subscribe(topic)          → suscribe a un tópico
-//     mqttClient.publish(topic, payload)   → publica un mensaje
-//     mqttClient.loop()                    → procesa mensajes entrantes (llamar en loop)
-//   Limitación: el buffer de mensajes es configurable (setBufferSize); por defecto 128 B.
-#include <PubSubClient.h>
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ESTADO GLOBAL
-// ─────────────────────────────────────────────────────────────────────────────
-
-/*
- * SensorState agrupa todas las variables de estado del sistema en una sola
- * estructura. Usar una struct en lugar de variables sueltas facilita pasar
- * el estado a funciones y deja claro qué pertenece al "estado del sistema".
- */
-struct SensorState {
-  int   raw       = 0;      // lectura ADC cruda (0 = mojado, 1023 = seco)
-  float percent   = 0.0f;   // humedad convertida a porcentaje (0% = seco, 100% = mojado)
-  bool  watering  = false;  // true mientras la electroválvula está abierta
-  bool  cooldown  = false;  // true durante la espera obligatoria post-riego
-};
-
-// g_state es la única fuente de verdad del estado del sistema.
-// El prefijo "g_" marca que es una variable global (estándar del proyecto).
-static SensorState g_state;
-
-/*
- * Temporizadores — usamos unsigned long (32 bits) porque millis() devuelve
- * ese tipo. El contador de millis() se desborda a cero cada ~49 días, pero
- * la aritmética de desbordamiento sin signo es correcta: si g_lastSample=0
- * y millis() vale 4294967290 tras el desbordamiento, la diferencia da el
- * tiempo real transcurrido sin necesidad de ningún ajuste especial.
- */
-static unsigned long g_lastSample = 0;  // marca de tiempo del último muestreo
-static unsigned long g_waterStart = 0;  // instante en que comenzó el riego actual
-static unsigned long g_coolStart  = 0;  // instante en que comenzó el cooldown actual
-
-// ─────────────────────────────────────────────────────────────────────────────
-// OBJETOS DE RED
-// ─────────────────────────────────────────────────────────────────────────────
-
-/*
- * WiFiClient implementa la interfaz Client de Arduino (read/write/connect).
- * PubSubClient lo usa internamente para enviar y recibir bytes TCP.
- * Al pasarlo al constructor de PubSubClient le indicamos que use TCP simple
- * (sin TLS). Para TLS se usaría WiFiClientSecure.
- */
-WiFiClient   wifiClient;
-
-/*
- * mqttClient es el objeto central de MQTT. Internamente mantiene:
- *   • El socket TCP (vía wifiClient)
- *   • El buffer de entrada/salida de mensajes MQTT
- *   • El estado de conexión y el keep-alive (PINGREQ/PINGRESP)
- */
-PubSubClient mqttClient(wifiClient);
-
-/*
- * server escucha en el puerto 80 (HTTP estándar). No necesita credenciales
- * ya que es un servidor local de invernadero en red privada.
- */
+// ── Servidor web ─────────────────────────────────────────────────
+// ESP8266WebServer gestiona peticiones HTTP entrantes.
+// El parámetro 80 es el puerto TCP estándar para HTTP.
+// Los clientes (navegadores) se conectan a http://<IP_del_ESP>/
 ESP8266WebServer server(80);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UTILIDADES
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Clientes MQTT ────────────────────────────────────────────────
+// WiFiClient es la capa de transporte TCP/IP sobre Wi-Fi.
+// PubSubClient usa ese canal TCP para hablar el protocolo MQTT.
+// Separamos los dos objetos para poder reutilizar WiFiClient si
+// necesitáramos otras conexiones TCP en el futuro.
+WiFiClient   wifiClient;
+PubSubClient mqtt(wifiClient);  // mqtt es el objeto que publica/suscribe
 
-/**
- * rawToPercent — Convierte la lectura ADC cruda a porcentaje de humedad.
- *
- * El ADC del ESP8266 convierte una tensión analógica (0-3.3 V en el pin A0,
- * aunque el NodeMCU tiene un divisor resistivo que escala a 0-1 V externo)
- * a un valor digital de 10 bits: 0-1023.
- *
- * El sensor K8/C11 es RESISTIVO: su resistencia interna cae cuando el suelo
- * está húmedo, lo que provoca una tensión de salida MENOR. Por eso el mapa
- * está INVERTIDO respecto a lo intuitivo:
- *   ADC alto (≈ ADC_SECO=1023) → suelo SECO   → 0%
- *   ADC bajo (≈ ADC_MOJADO=300) → suelo MOJADO → 100%
- *
- * La fórmula de interpolación lineal y el clamping final (constrain a [0,100])
- * protegen contra lecturas fuera del rango de calibración.
- *
- * @param raw  Valor ADC leído de analogRead(A0), rango 0-1023.
- * @return     Porcentaje de humedad en [0.0, 100.0].
- */
+// Temporizador de reconexión MQTT.
+// millis() devuelve los ms transcurridos desde el arranque (tipo unsigned long).
+// Guardamos el instante del último intento de reconexión para no bloquear
+// el loop() mientras esperamos entre reintentos.
+unsigned long lastMqttAttemptMs = 0;
+
+// Intervalo mínimo entre intentos de reconexión MQTT (5 segundos).
+// UL = unsigned long literal, evita desbordamientos en aritmética de tiempo.
+#define MQTT_RECONNECT_INTERVAL_MS 5000UL
+
+// ================================================================
+// MÁQUINA DE ESTADOS DEL RIEGO
+// ================================================================
+// Una "máquina de estados" es una forma de organizar el comportamiento
+// del sistema. En lugar de usar muchas banderas booleanas (isWatering,
+// isCooldown…), usamos un único valor que indica en qué fase se está.
+//
+// Diagrama de estados:
+//
+//   ┌──────┐  pct < UMBRAL  ┌──────────┐  tiempo >= RELAY_ON  ┌──────────┐
+//   │ IDLE │──────────────→ │ WATERING │────────────────────→  │ COOLDOWN │
+//   │      │  o cmd MQTT    │          │                        │          │
+//   └──────┘                └──────────┘                        └──────────┘
+//      ↑                                                              │
+//      └──────────────────────── tiempo >= COOLDOWN_MS ──────────────┘
+//
+// IDLE     : El sistema está en reposo, monitoreando la humedad.
+//            Si el porcentaje cae bajo el umbral (suelo seco) → WATERING.
+//            También puede llegar aquí por comando MQTT {"action":"water"}.
+// WATERING : El relé está activo y la válvula abierta.
+//            Cuando transcurre RELAY_ON_TIME_MS → cierra la válvula → COOLDOWN.
+// COOLDOWN : Período de espera para que el suelo absorba el agua.
+//            Evita que el sistema active el riego en bucle continuo.
+//            Cuando transcurre COOLDOWN_MS → vuelve a IDLE.
+
+enum RelayState {
+  IDLE,       // Reposo: esperando que la humedad baje del umbral
+  WATERING,   // Regando: válvula abierta, relé activo, LED encendido
+  COOLDOWN    // Enfriamiento: válvula cerrada, esperando antes del siguiente ciclo
+};
+
+// Estado actual del sistema. Arranca en IDLE (seguro, válvula cerrada).
+RelayState relayState = IDLE;
+
+// Marcas de tiempo para controlar las duraciones de cada fase.
+// millis() en Arduino es como un reloj desde el arranque (no bloqueante).
+// Usamos unsigned long para aguantar ~49 días sin desbordamiento.
+unsigned long relayStartMs    = 0;  // cuándo comenzó el riego actual
+unsigned long cooldownStartMs = 0;  // cuándo comenzó el cooldown actual
+unsigned long lastWaterEndMs  = 0;  // cuándo terminó el último riego (0 = nunca)
+
+// ================================================================
+// VARIABLES DE LECTURA DEL SENSOR
+// ================================================================
+// Guardamos la última lectura en variables globales para poder
+// acceder a ellas desde el servidor web, MQTT y el control del relé
+// sin necesidad de releer el sensor en cada función (más eficiente).
+
+float         lastPercent  = 0.0f;  // Última humedad en % (0.0 = seco, 100.0 = saturado)
+int           lastRaw      = 0;     // Último valor crudo del ADC (0–1023)
+unsigned long lastSampleMs = 0;     // Momento de la última lectura (millis)
+
+// ================================================================
+// readADC()  —  Lectura promediada del sensor de humedad
+// ================================================================
+// ¿POR QUÉ PROMEDIAR?
+//   El ADC (Convertidor Analógico-Digital) del ESP8266 tiene ruido
+//   eléctrico. Una sola lectura puede variar ±10 unidades. Tomar
+//   ANALOG_SAMPLES lecturas y promediarlas da un valor más estable.
+//
+// ¿POR QUÉ delay() ENTRE MUESTRAS?
+//   Después de una lectura el condensador interno del ADC necesita
+//   un pequeño tiempo para "recargarse". ANALOG_DELAY_MS (5 ms por
+//   defecto) evita leer el mismo valor repetido.
+//
+// RETORNO: entero en el rango 0–1023 (resolución de 10 bits del ADC).
+//   • Suelo SECO  → valor ALTO  (poca conductividad → más voltaje → ~571)
+//   • Suelo HÚMEDO → valor BAJO (más conductividad → menos voltaje → ~336)
+//   (Esto parece contraintuitivo, pero es la lógica del sensor resistivo)
+// ================================================================
+int readADC() {
+  long sum = 0;
+  for (int i = 0; i < ANALOG_SAMPLES; i++) {
+    sum += analogRead(A0);    // Lee el pin analógico A0 (0–1023)
+    delay(ANALOG_DELAY_MS);   // Pequeña pausa para estabilidad del ADC
+  }
+  return (int)(sum / ANALOG_SAMPLES);  // Devuelve el promedio entero
+}
+
+// ================================================================
+// rawToPercent(raw)  —  Conversión ADC → porcentaje de humedad
+// ================================================================
+// Aplica una interpolación lineal entre los dos puntos de calibración:
+//
+//   raw = RAW_DRY  →  0 %   (sensor en aire, completamente seco)
+//   raw = RAW_WET  →  100 % (sensor sumergido en agua)
+//
+// FÓRMULA:
+//   pct = (RAW_DRY - raw) / (RAW_DRY - RAW_WET) × 100
+//
+//   Ejemplo con RAW_DRY=571, RAW_WET=336 y una lectura raw=450:
+//   pct = (571 - 450) / (571 - 336) × 100
+//       = 121 / 235 × 100
+//       ≈ 51.5 %
+//
+// RECORTE AL RANGO [0, 100]:
+//   Si el sensor da un valor fuera del rango calibrado (por ruido o
+//   posición incorrecta), la fórmula puede dar negativos o >100.
+//   El recorte (clamp) evita mostrar valores absurdos.
+//
+// PARÁMETRO: raw  — valor crudo del ADC (0–1023)
+// RETORNO  : float en [0.0, 100.0] representando % de humedad
+// ================================================================
 float rawToPercent(int raw) {
-  // Interpolación lineal inversa: cuanto mayor el ADC, menor la humedad.
-  float pct = (float)(ADC_SECO - raw) / (float)(ADC_SECO - ADC_MOJADO) * 100.0f;
-  // Clamping: fuerza el resultado al rango [0, 100] para no reportar valores
-  // absurdos si el sensor está fuera del suelo o mal calibrado.
+  // Interpolación lineal inversa (valores altos = seco = 0%)
+  float pct = (float)(RAW_DRY - raw) / (float)(RAW_DRY - RAW_WET) * 100.0f;
+
+  // Recortar al rango válido para evitar valores absurdos por ruido o mala calibración
   if (pct < 0.0f)   pct = 0.0f;
   if (pct > 100.0f) pct = 100.0f;
+
   return pct;
 }
 
-/**
- * stateLabel — Devuelve una etiqueta textual según el nivel de humedad.
- *
- * Tres estados cubren los casos de interés para el riego:
- *   DRY   → suelo seco, por debajo del umbral de riego
- *   MOIST → humedad aceptable, entre los dos umbrales
- *   WET   → suelo húmedo, por encima del umbral de corte
- *
- * @param pct  Porcentaje de humedad [0, 100].
- * @return     Cadena literal (almacenada en Flash, no en RAM).
- */
-const char* stateLabel(float pct) {
-  if (pct < (float)UMBRAL_RIEGO) return "DRY";
-  if (pct < (float)UMBRAL_CORTE) return "MOIST";
-  return "WET";
-}
+// ================================================================
+// updateRelay(pct)  —  Control del relé y el LED según la humedad
+// ================================================================
+// Esta función implementa la máquina de estados descrita arriba.
+// Se llama en cada iteración del loop() con el porcentaje actual.
+//
+// LÓGICA DEL PIN DE RELÉ (active-HIGH en este módulo):
+//   digitalWrite(PIN_RELAY, HIGH) → bobina del relé energizada
+//                                  → contacto NO cierra el circuito
+//                                  → electroválvula recibe corriente
+//                                  → VÁLVULA ABIERTA (agua fluye)
+//
+//   digitalWrite(PIN_RELAY, LOW)  → bobina desactivada
+//                                  → contacto NO abre el circuito
+//                                  → electroválvula sin corriente
+//                                  → VÁLVULA CERRADA (estado seguro)
+//
+// LED INTEGRADO (active-LOW en NodeMCU):
+//   El LED_BUILTIN del NodeMCU está conectado con lógica invertida:
+//   digitalWrite(PIN_LED, LOW)  → LED ENCENDIDO (regando)
+//   digitalWrite(PIN_LED, HIGH) → LED APAGADO   (en reposo)
+//
+// USO DE millis() EN LUGAR DE delay():
+//   delay(5000) bloquea el procesador 5 s — durante ese tiempo no
+//   se atienden peticiones web ni mensajes MQTT.
+//   En su lugar guardamos el instante de inicio (relayStartMs) y en
+//   cada llamada calculamos si ya pasó el tiempo suficiente.
+//   Esto se llama "multitarea cooperativa no bloqueante".
+//
+// PARÁMETRO: pct — humedad actual en % (0.0 = seco, 100.0 = húmedo)
+// ================================================================
+void updateRelay(float pct) {
+  unsigned long now = millis();  // Tiempo actual en ms desde el arranque
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CONTROL DEL RIEGO
-// ─────────────────────────────────────────────────────────────────────────────
+  switch (relayState) {
 
-/**
- * startWatering — Activa la electroválvula (relé HIGH).
- *
- * @param force  Si es true, cancela el cooldown activo y fuerza el inicio
- *               del riego aunque el sistema esté en período de espera.
- *               Usado por comandos manuales desde la Raspberry Pi.
- *               Si es false (valor por defecto), respeta el cooldown.
- *
- * El relé es de tipo "active-HIGH":
- *   GPIO HIGH → bobina del relé energizada → contacto NO cierra → válvula abre.
- *   GPIO LOW  → bobina desactivada         → contacto NO abre   → válvula cierra.
- *
- * El diodo flyback (1N4007) en paralelo con la bobina absorbe el pico de
- * tensión inversa ("kick-back") que aparece al desactivar la bobina del relé,
- * protegiendo el pin GPIO del ESP8266 de voltajes destructivos.
- */
-void startWatering(bool force = false) {
-  // Si ya estamos regando, no hacer nada (evitar reset del temporizador).
-  if (g_state.watering) return;
+    // ── IDLE: sistema en reposo, monitoreando ───────────────────
+    case IDLE:
+      if (pct < ON_THRESHOLD_PERCENT) {
+        // El suelo está más seco que el umbral → iniciar riego
+        digitalWrite(PIN_RELAY, HIGH);  // HIGH → relé activo → válvula abierta
+        relayStartMs = now;             // Registrar cuándo comenzó el riego
+        relayState   = WATERING;        // Transición al estado WATERING
+        Serial.printf("[RIEGO] Iniciado. Humedad: %.1f%%\n", pct);
+      }
+      break;
 
-  // Si hay cooldown activo y no es un comando forzado, respetar la espera.
-  if (g_state.cooldown && !force) return;
+    // ── WATERING: válvula abierta, contando tiempo ──────────────
+    case WATERING:
+      // now - relayStartMs: ms transcurridos desde que se abrió la válvula
+      if (now - relayStartMs >= RELAY_ON_TIME_MS) {
+        // Ya regó suficiente → cerrar la válvula
+        digitalWrite(PIN_RELAY, LOW);   // LOW → relé inactivo → válvula cerrada
+        lastWaterEndMs  = now;          // Guardar cuándo terminó este riego
+        cooldownStartMs = now;          // Iniciar conteo del cooldown
+        relayState      = COOLDOWN;     // Transición al estado COOLDOWN
+        Serial.println("[RIEGO] Terminado. Iniciando cooldown.");
+      }
+      break;
 
-  // Cancelar cooldown si el comando es forzado (iniciado manualmente).
-  if (force && g_state.cooldown) {
-    g_state.cooldown = false;
-    Serial.println("[Riego] Cooldown cancelado por comando manual.");
+    // ── COOLDOWN: válvula cerrada, esperando antes del siguiente ciclo ──
+    case COOLDOWN:
+      if (now - cooldownStartMs >= COOLDOWN_MS) {
+        // El tiempo de espera terminó → volver a monitorear
+        relayState = IDLE;
+        Serial.println("[RIEGO] Cooldown finalizado. Listo para siguiente ciclo.");
+      }
+      break;
   }
 
-  // Activar el relé: HIGH pone tensión en la bobina → contacto NO cierra.
-  digitalWrite(PIN_RELAY, HIGH);
-  g_state.watering = true;
-  g_waterStart = millis();  // guarda el instante de inicio para calcular la duración
-
-  Serial.println("[Riego] Iniciado.");
+  // LED: refleja visualmente si el riego está activo.
+  // Operador ternario: condición ? valor_si_true : valor_si_false
+  // LOW  → LED encendido  (active-low)   cuando estamos en WATERING
+  // HIGH → LED apagado    (active-low)   en cualquier otro estado
+  digitalWrite(PIN_LED, (relayState == WATERING) ? LOW : HIGH);
 }
 
-/**
- * stopWatering — Desactiva la electroválvula e inicia el período de cooldown.
- *
- * El cooldown previene que el suelo se embarre al regar en ciclos demasiado
- * cortos. El sistema espera COOLDOWN_MS antes de permitir otro ciclo automático
- * (el riego manual desde la Raspberry Pi sí puede saltarse el cooldown).
- */
-void stopWatering() {
-  // Protección: no hacer nada si ya está detenido.
-  if (!g_state.watering) return;
+// ================================================================
+// HANDLERS DEL SERVIDOR WEB
+// ================================================================
+// Un "handler" (manejador) es una función que el servidor llama
+// automáticamente cuando llega una petición HTTP a una ruta específica.
+// Se registran en setup() con server.on("/ruta", funcion).
 
-  // Desactivar el relé: LOW desactiva la bobina → contacto NO abre → válvula cierra.
-  digitalWrite(PIN_RELAY, LOW);
-  g_state.watering = false;
+// ── GET /  →  Página HTML de monitoreo ──────────────────────────
+// Devuelve una página web completa con el estado actual del sistema.
+// El navegador puede recargar manualmente para ver datos actualizados.
+// (Para actualización automática se podría agregar meta refresh o JS)
+void handleRoot() {
+  // ── Determinar el estado legible en español ──────────────────
+  // Convertimos el estado interno (enum) a texto para mostrarlo en la web.
+  String estado;
+  if      (relayState == WATERING) estado = "REGANDO";
+  else if (relayState == COOLDOWN) estado = "COOLDOWN";
+  else if (lastPercent < ON_THRESHOLD_PERCENT) estado = "SECO";
+  else    estado = "HUMEDO";
 
-  // Iniciar el período de cooldown.
-  g_state.cooldown = true;
-  g_coolStart = millis();
-
-  Serial.println("[Riego] Detenido. Cooldown iniciado.");
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// LECTURA DEL SENSOR
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * readSensor — Toma una muestra del sensor K8/C11.
- *
- * analogRead(A0) devuelve un entero de 10 bits (0-1023) proporcional a la
- * tensión en el pin A0. La conversión tarda ~100 µs en el ESP8266.
- * El resultado se almacena en g_state para que todas las funciones del
- * sistema tengan acceso a la última lectura sin re-muestrear el sensor.
- */
-void readSensor() {
-  g_state.raw     = analogRead(A0);          // lectura ADC cruda
-  g_state.percent = rawToPercent(g_state.raw); // conversión a %
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// LÓGICA DE RIEGO AUTOMÁTICO
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * updateWatering — Máquina de estados del riego automático.
- *
- * Esta función se llama frecuentemente desde loop() y evalúa las transiciones
- * entre los tres estados del sistema de riego:
- *
- *   IDLE ──(humedad < UMBRAL_RIEGO)──► WATERING
- *   WATERING ──(tiempo ≥ DURACION_RIEGO_MS ó humedad ≥ UMBRAL_CORTE)──► COOLDOWN
- *   COOLDOWN ──(tiempo ≥ COOLDOWN_MS)──► IDLE
- *
- * El uso de millis() en lugar de delay() es fundamental en Arduino/ESP8266:
- * delay() bloquea el procesador e impide atender el servidor web, el cliente
- * MQTT y el watchdog (WDT). millis() devuelve el tiempo transcurrido desde
- * el arranque sin bloquear el loop principal (programación no-bloqueante).
- */
-void updateWatering() {
-  unsigned long now = millis();
-
-  // ── Transición COOLDOWN → IDLE ─────────────────────────────────
-  if (g_state.cooldown && (now - g_coolStart >= COOLDOWN_MS)) {
-    g_state.cooldown = false;
-    Serial.println("[Riego] Cooldown terminado. Sistema listo.");
-  }
-
-  // ── Transición IDLE → WATERING (riego automático) ──────────────
-  // Solo si: no estamos regando, no hay cooldown, Y el suelo está seco.
-  if (!g_state.watering && !g_state.cooldown
-      && g_state.percent < (float)UMBRAL_RIEGO) {
-    startWatering(/*force=*/false);
-  }
-
-  // ── Transición WATERING → COOLDOWN ─────────────────────────────
-  if (g_state.watering) {
-    bool timeout = (now - g_waterStart >= DURACION_RIEGO_MS); // riego demasiado largo
-    bool soilWet = (g_state.percent >= (float)UMBRAL_CORTE);  // suelo ya húmedo
-    if (timeout || soilWet) {
-      stopWatering();
+  // ── Calcular cuándo fue el último riego ──────────────────────
+  String ultimoRiego;
+  if (lastWaterEndMs == 0) {
+    // Nunca ha regado desde el arranque
+    ultimoRiego = "Sin riego registrado";
+  } else {
+    // Convertimos ms a segundos y luego a formato legible
+    unsigned long segs = (millis() - lastWaterEndMs) / 1000UL;
+    if (segs < 60) {
+      ultimoRiego = String(segs) + " seg";
+    } else if (segs < 3600) {
+      ultimoRiego = String(segs / 60) + " min " + String(segs % 60) + " seg";
+    } else {
+      ultimoRiego = String(segs / 3600) + " h " + String((segs % 3600) / 60) + " min";
     }
   }
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CONSTRUCCIÓN DEL PAYLOAD JSON
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * buildJson — Construye el string JSON con el estado actual.
- *
- * El payload es el mismo para la publicación MQTT y para el endpoint GET /json.
- * Construir el JSON manualmente (sin librería) es suficiente aquí porque el
- * formato es fijo y pequeño. Para payloads dinámicos o anidados se recomienda
- * la librería ArduinoJson.
- *
- * Ejemplo de salida:
- *   {"raw":512,"percent":42.3,"state":"MOIST","watering":false,"cooldown":false}
- *
- * El servidor EM_server mapea "percent" → "soil_humidity" y "raw" → "soil_raw"
- * mediante la tabla field_mappings de config.json.
- *
- * @return  String de Arduino con el JSON completo.
- */
-String buildJson() {
-  String j = "{";
-  j += "\"raw\":"      + String(g_state.raw)                         + ",";
-  j += "\"percent\":"  + String(g_state.percent, 1)                  + ",";
-  j += "\"state\":\""  + String(stateLabel(g_state.percent))         + "\",";
-  j += "\"watering\":" + String(g_state.watering ? "true" : "false") + ",";
-  j += "\"cooldown\":" + String(g_state.cooldown ? "true" : "false");
-  j += "}";
-  return j;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SERVIDOR WEB HTTP
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * handleRoot — Handler de GET /
- *
- * Genera una página HTML con el estado actual del sensor y el riego.
- * La página se auto-refresca cada 30 segundos mediante la cabecera
- * <meta http-equiv='refresh'>.
- *
- * El HTML se construye como String de Arduino porque no hay sistema de
- * archivos disponible en este sketch (se podría usar LittleFS para servir
- * archivos estáticos, pero aumenta la complejidad del proyecto).
- */
-void handleRoot() {
-  String estado     = stateLabel(g_state.percent);
-  String riegoBadge = g_state.watering ? "💧 Activo"    : "⏸ Inactivo";
-  String coolBadge  = g_state.cooldown ? "⏳ En espera" : "✅ Listo";
-
+  // ── Construir el HTML ─────────────────────────────────────────
+  // Arduino trabaja bien concatenando String. Para proyectos más grandes
+  // sería mejor usar PROGMEM o LittleFS, pero para esta escala está bien.
   String html =
-    "<!DOCTYPE html><html lang='es'><head>"
+    "<!DOCTYPE html>"
+    "<html lang='es'><head>"
     "<meta charset='UTF-8'>"
+    // viewport: hace que la página se vea bien en celulares
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<meta http-equiv='refresh' content='30'>"  // auto-recarga cada 30 s
-    "<title>Invernadero – Humedad Suelo</title>"
+    "<title>Humedad Suelo</title>"
     "<style>"
-    "body{font-family:sans-serif;background:#f4f6f4;margin:0;padding:1rem}"
-    "h1{color:#2e7d32}h2{color:#555;font-size:1rem}"
-    ".card{background:#fff;border-radius:12px;padding:1rem 1.2rem;"
-           "margin:.6rem 0;box-shadow:0 2px 8px rgba(0,0,0,.1)}"
-    ".val{font-size:2.5rem;font-weight:700;color:#1b5e20}"
-    ".badge{display:inline-block;padding:.2rem .6rem;border-radius:6px;"
-            "font-size:.85rem;font-weight:600;margin-top:.3rem}"
-    ".wet{background:#e3f2fd;color:#0d47a1}"
-    ".moist{background:#e8f5e9;color:#1b5e20}"
-    ".dry{background:#fff3e0;color:#e65100}"
-    ".on{background:#fff3e0;color:#e65100}"   // ámbar = atención (riego activo)
-    ".off{background:#e8f5e9;color:#2e7d32}"  // verde  = inactivo/listo
-    "a{color:#2e7d32}"
-    "</style></head><body>"
-    "<h1>🌱 Invernadero – Monitor de Humedad</h1>"
-    "<h2>IP: " + WiFi.localIP().toString() + "</h2>"
-    // Tarjeta principal: valor de humedad + etiqueta de estado
-    "<div class='card'>"
-      "<div class='val'>" + String(g_state.percent, 1) + " %</div>"
-      "<div>Humedad del suelo</div>"
-      "<span class='badge " +
-        (estado == "DRY" ? "dry" : (estado == "WET" ? "wet" : "moist")) +
-      "'>" + estado + "</span>"
-    "</div>"
-    "<div class='card'>ADC Raw: <b>" + String(g_state.raw) + "</b> / 1023</div>"
-    "<div class='card'>Riego: <span class='badge " +
-      (g_state.watering ? "on" : "off") + "'>" + riegoBadge + "</span></div>"
-    "<div class='card'>Cooldown: <span class='badge " +
-      (g_state.cooldown ? "on" : "off") + "'>" + coolBadge + "</span></div>"
-    // Enlace a la API JSON para integraciones externas
+    "body{font-family:sans-serif;max-width:480px;margin:2rem auto;padding:0 1rem}"
+    "h1{color:#2a7a2a}"
+    ".card{background:#f4f4f4;border-radius:8px;padding:1rem;margin:.5rem 0}"
+    ".val{font-size:2rem;font-weight:bold;color:#1a5c1a}"
+    "</style>"
+    "</head><body>"
+    "<h1>🌱 Monitor de Humedad</h1>"
+    // String(lastPercent, 1) → número con 1 decimal (ej: "65.3")
+    "<div class='card'><div class='val'>" + String(lastPercent, 1) + " %</div>"
+    "<div>Humedad del suelo</div></div>"
+    "<div class='card'>ADC Raw: <b>" + String(lastRaw) + "</b></div>"
+    "<div class='card'>Estado: <b>" + estado + "</b></div>"
+    "<div class='card'>Último riego: <b>" + ultimoRiego + "</b></div>"
     "<p><a href='/json'>Ver JSON</a></p>"
     "</body></html>";
 
-  // Tipo MIME explícito con charset para que el navegador muestre tildes.
+  // Enviar la respuesta HTTP 200 OK con el HTML
+  // "text/html; charset=UTF-8" es el Content-Type para páginas web
   server.send(200, "text/html; charset=UTF-8", html);
 }
 
-/**
- * handleJson — Handler de GET /json
- *
- * Devuelve el estado actual como JSON. Útil para:
- *   • Depuración rápida con curl o el navegador.
- *   • Integración con sistemas externos que no usan MQTT.
- */
+// ── GET /json  →  Datos en formato JSON ─────────────────────────
+// Útil para dashboards, scripts, o cualquier sistema que consuma datos
+// del ESP8266 directamente por HTTP sin pasar por MQTT.
+// Ejemplo de respuesta:
+//   {"raw":450,"percent":51.5,"watering":false,"cooldown":false,
+//    "state":"WET","last_watered_sec":120}
 void handleJson() {
-  server.send(200, "application/json", buildJson());
+  // Estado en inglés (estándar para APIs/JSON)
+  String estado;
+  if      (relayState == WATERING) estado = "WATERING";
+  else if (relayState == COOLDOWN) estado = "COOLDOWN";
+  else if (lastPercent < ON_THRESHOLD_PERCENT) estado = "DRY";
+  else    estado = "WET";
+
+  // secsAgo: segundos desde el último riego. -1 si nunca ha regado.
+  long secsAgo = (lastWaterEndMs == 0) ? -1L : (long)((millis() - lastWaterEndMs) / 1000UL);
+
+  // Construir el JSON manualmente (sin librería externa para ahorrar RAM)
+  String json = "{";
+  json += "\"raw\":"              + String(lastRaw)                                + ",";
+  json += "\"percent\":"          + String(lastPercent, 1)                         + ",";
+  json += "\"watering\":"         + String(relayState == WATERING ? "true":"false") + ",";
+  json += "\"cooldown\":"         + String(relayState == COOLDOWN ? "true":"false") + ",";
+  json += "\"state\":\""          + estado                                         + "\",";
+  json += "\"last_watered_sec\":" + String(secsAgo);
+  json += "}";
+
+  // "application/json" es el Content-Type estándar para APIs REST
+  server.send(200, "application/json", json);
 }
 
-/**
- * handleNotFound — Handler de rutas no registradas (404).
- */
-void handleNotFound() {
-  server.send(404, "text/plain", "Not found");
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MQTT — PUBLICACIÓN Y SUSCRIPCIÓN
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * mqttEnabled — Comprueba si MQTT está habilitado en config.h.
- *
- * Si MQTT_SERVER es una cadena vacía (""), toda la lógica MQTT se omite.
- * Esto permite usar el sketch sin broker MQTT, solo con el servidor web.
- */
-bool mqttEnabled() {
-  return strlen(MQTT_SERVER) > 0;
-}
-
-/**
- * mqttCallback — Función llamada por PubSubClient al recibir un mensaje MQTT.
- *
- * CONCEPTO: En el patrón publicar/suscribir, el broker entrega mensajes de
- * forma asíncrona. PubSubClient no usa threads; en cambio, cuando se llama a
- * mqttClient.loop() procesa los mensajes en la cola y llama a esta función
- * para cada mensaje recibido. Es un patrón "event-driven" dentro de un loop
- * single-threaded.
- *
- * FIRMA FIJA: PubSubClient exige exactamente estos tres parámetros:
- *   topic    → nombre del tópico del mensaje recibido (cadena terminada en '\0')
- *   payload  → puntero al array de bytes del cuerpo del mensaje
- *   length   → longitud del payload en bytes (sin terminador nulo)
- *
- * COMANDO SOPORTADO:
- *   Tópico : MQTT_TOPICO_CMD  (p.ej. "commands/esp8266")
- *   Payload: {"action":"water"}
- *   Efecto : activa un ciclo de riego por DURACION_RIEGO_MS.
- *            El riego manual cancela el cooldown si estuviera activo.
- *
- * @param topic    Tópico del mensaje recibido.
- * @param payload  Bytes del cuerpo del mensaje (NO es un String terminado en '\0').
- * @param length   Número de bytes en payload.
- */
+// ================================================================
+// mqttCallback(topic, payload, length)  —  Receptor de comandos MQTT
+// ================================================================
+// PubSubClient llama automáticamente a esta función cada vez que llega
+// un mensaje en alguno de los tópicos suscritos. Se registra con
+// mqtt.setCallback(mqttCallback) en setup().
+//
+// PARÁMETROS:
+//   topic   : cadena C con el nombre del tópico del mensaje recibido
+//             (ej: "commands/esp8266")
+//   payload : array de bytes con el contenido del mensaje.
+//             ⚠ NO tiene terminador '\0', no es un string directamente.
+//   length  : número de bytes válidos en payload.
+//
+// FLUJO:
+//   1. Copiar payload a un buffer con '\0' al final (para usarlo como string).
+//   2. Filtrar: solo procesar mensajes del tópico MQTT_TOPICO_CMD.
+//   3. Buscar la acción "water" en el JSON recibido.
+//   4. Si el sistema está en IDLE → activar riego.
+//      Si ya está regando/enfriando → ignorar (seguridad).
+//
+// NOTA: No parseamos el JSON con una librería completa para ahorrar RAM.
+//       strstr() busca la subcadena "\"water\"" dentro del mensaje,
+//       lo cual es suficiente para este formato simple y conocido.
+// ================================================================
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  // Convertir payload (bytes) a String de Arduino para facilitar el parsing.
-  // Creamos el String con longitud explícita para evitar que se corte si el
-  // payload contiene bytes '\0' internos (poco probable en JSON, pero buena práctica).
-  String msg;
-  msg.reserve(length);
-  for (unsigned int i = 0; i < length; i++) {
-    msg += (char)payload[i];
-  }
+  // ── Paso 1: Convertir payload (bytes sin '\0') a string C ────
+  // Declaramos un array local con espacio para el terminador '\0'
+  char msg[length + 1];
+  memcpy(msg, payload, length);  // Copiar los bytes del payload
+  msg[length] = '\0';            // Agregar terminador de string
 
-  Serial.print("[MQTT] Mensaje en tópico '");
-  Serial.print(topic);
-  Serial.print("': ");
-  Serial.println(msg);
+  Serial.printf("[MQTT] Mensaje recibido en %s: %s\n", topic, msg);
 
-  // Procesar comandos recibidos en el tópico de comandos.
-  // Comparamos el tópico completo para no confundir con otros posibles tópicos
-  // a los que pudiera suscribirse el cliente en el futuro.
-  if (String(topic) == String(MQTT_TOPICO_CMD)) {
-    // Búsqueda simple del campo "action":"water" sin parsear JSON completo.
-    // Esto evita agregar la librería ArduinoJson solo para un caso de uso simple.
-    // Si en el futuro se añaden más comandos, se recomienda usar ArduinoJson.
-    if (msg.indexOf("\"action\"") >= 0 && msg.indexOf("\"water\"") >= 0) {
-      Serial.println("[Riego] Comando manual recibido desde Raspberry Pi.");
-      // force=true: cancela cooldown activo y arranca el riego inmediatamente.
-      startWatering(/*force=*/true);
+  // ── Paso 2: Filtrar por tópico ───────────────────────────────
+  // strcmp compara dos strings C y retorna 0 si son iguales.
+  // Si el mensaje NO es del tópico de comandos, salir sin hacer nada.
+  if (strcmp(topic, MQTT_TOPICO_CMD) != 0) return;
+
+  // ── Paso 3: Buscar la acción "water" en el JSON ──────────────
+  // strstr(cadena, subcadena) retorna un puntero si la encuentra, nullptr si no.
+  // Buscamos "\"water\"" (con comillas escapadas) para evitar falsos positivos.
+  if (strstr(msg, "\"water\"") != nullptr) {
+
+    // ── Paso 4: Activar riego si el sistema está en reposo ─────
+    if (relayState == IDLE) {
+      digitalWrite(PIN_RELAY, HIGH);  // HIGH → relé activo → válvula abierta
+      digitalWrite(PIN_LED,   LOW);   // LOW  → LED encendido (active-low)
+      relayStartMs = millis();        // Registrar inicio del riego
+      relayState   = WATERING;        // Transición a estado WATERING
+      Serial.println("[MQTT] Comando 'water' recibido. Riego iniciado.");
     } else {
-      Serial.print("[MQTT] Comando desconocido: ");
-      Serial.println(msg);
+      // El sistema ya está regando o en cooldown → ignorar el comando
+      // (seguridad: evita extender el riego más allá de RELAY_ON_TIME_MS)
+      Serial.println("[MQTT] Comando 'water' recibido pero el sistema no está en IDLE; ignorado.");
     }
   }
 }
 
-/**
- * mqttReconnect — Conecta (o reconecta) al broker MQTT.
- *
- * Se llama en setup() y también en loop() cuando se detecta desconexión.
- * Tras una reconexión exitosa restablece TODAS las suscripciones, ya que
- * el broker descarta las suscripciones al desconectarse (para clientes sin
- * sesión persistente, que es el caso con cleanSession=true por defecto).
- *
- * KEEP-ALIVE: PubSubClient envía automáticamente mensajes PINGREQ al broker
- * cada keepalive/2 segundos para mantener la sesión TCP activa. El broker
- * desconecta al cliente si no recibe ningún mensaje en keepalive segundos.
- */
-void mqttReconnect() {
-  // No hacer nada si MQTT no está configurado o si ya estamos conectados.
-  if (!mqttEnabled() || mqttClient.connected()) return;
+// ================================================================
+// reconnectMQTT()  —  Conexión y reconexión al broker MQTT
+// ================================================================
+// MQTT requiere una conexión TCP persistente al broker.
+// Si la red se cae o el broker se reinicia, la conexión se pierde.
+// Esta función se encarga de (re)establecerla cuando sea necesario.
+//
+// ¿POR QUÉ NO USAMOS connect() DIRECTAMENTE EN loop()?
+//   mqtt.connect() puede tardar varios segundos en fallar (timeout TCP).
+//   Si lo llamáramos en cada iteración del loop() cuando no hay conexión,
+//   bloquearíamos el procesador y el servidor web dejaría de responder.
+//   En su lugar, controlamos el intervalo con lastMqttAttemptMs y solo
+//   llamamos a reconnectMQTT() cada MQTT_RECONNECT_INTERVAL_MS (5 s).
+//
+// ¿POR QUÉ SUSCRIBIRSE AQUÍ Y NO EN setup()?
+//   En MQTT, las suscripciones se pierden al desconectarse del broker.
+//   Cada vez que reconectamos debemos volver a suscribirnos.
+//   Por eso la llamada a mqtt.subscribe() está dentro del if(ok) y no
+//   en un lugar que se ejecute una sola vez.
+//
+// RETORNO:
+//   true  → el cliente está conectado al finalizar (ya estaba o conectó OK)
+//   false → MQTT deshabilitado (MQTT_SERVER vacío) o falló la conexión
+// ================================================================
+bool reconnectMQTT() {
+  // Si MQTT_SERVER está vacío en config.h → MQTT deshabilitado, nada que hacer
+  if (strlen(MQTT_SERVER) == 0) return false;
+
+  // Si ya está conectado, no hacer nada (la reconexión es innecesaria)
+  if (mqtt.connected()) return true;
 
   Serial.print("[MQTT] Conectando a ");
   Serial.print(MQTT_SERVER);
   Serial.print("...");
 
+  // mqtt.connect() intenta la conexión TCP + handshake MQTT.
+  // Si el broker requiere usuario/contraseña, usamos la versión con credenciales.
+  // strlen() == 0 significa cadena vacía → sin autenticación.
   bool ok;
-  // La autenticación es opcional: si MQTT_USER está vacío, conectamos sin credenciales.
   if (strlen(MQTT_USER) > 0) {
-    ok = mqttClient.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASSWORD);
+    ok = mqtt.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASS_BROKER);
   } else {
-    ok = mqttClient.connect(MQTT_CLIENT_ID);
+    ok = mqtt.connect(MQTT_CLIENT_ID);  // Conexión anónima (sin usuario/contraseña)
   }
 
   if (ok) {
     Serial.println(" OK");
 
-    // Suscribirse al tópico de comandos para recibir instrucciones remotas.
-    // QoS 1 (segundo parámetro = 1): el broker garantiza entregar el mensaje
-    // al menos una vez. Si se usa QoS 0, el mensaje puede perderse en redes
-    // con pérdida de paquetes.
-    mqttClient.subscribe(MQTT_TOPICO_CMD, /*qos=*/1);
-    Serial.print("[MQTT] Suscrito a: ");
-    Serial.println(MQTT_TOPICO_CMD);
+    // Suscribirse al tópico de comandos para recibir órdenes remotas.
+    // QoS 0 (por defecto en PubSubClient): fire-and-forget, sin confirmación.
+    // Suficiente para comandos de riego donde la latencia importa poco.
+    mqtt.subscribe(MQTT_TOPICO_CMD);
+    Serial.printf("[MQTT] Suscrito a %s\n", MQTT_TOPICO_CMD);
   } else {
-    // mqttClient.state() devuelve un código de error numérico:
-    //  -4 MQTT_CONNECTION_TIMEOUT      → broker no responde
-    //  -3 MQTT_CONNECTION_LOST         → conexión TCP interrumpida
-    //  -2 MQTT_CONNECT_FAILED          → error de red
-    //  -1 MQTT_DISCONNECTED            → no intentó conectar
-    //   1 MQTT_CONNECT_BAD_PROTOCOL    → versión de protocolo rechazada
-    //   2 MQTT_CONNECT_BAD_CLIENT_ID   → client_id rechazado por el broker
-    //   5 MQTT_CONNECT_UNAUTHORIZED    → credenciales inválidas
-    Serial.print(" FALLO rc=");
-    Serial.println(mqttClient.state());
+    // mqtt.state() retorna un código de error numérico:
+    //  -4: MQTT_CONNECTION_TIMEOUT   -3: MQTT_CONNECTION_LOST
+    //  -2: MQTT_CONNECT_FAILED       -1: MQTT_DISCONNECTED
+    //   1: MQTT_CONNECT_BAD_PROTOCOL  2: MQTT_CONNECT_BAD_CLIENT_ID
+    //   3: MQTT_CONNECT_UNAVAILABLE   4: MQTT_CONNECT_BAD_CREDENTIALS
+    //   5: MQTT_CONNECT_UNAUTHORIZED
+    Serial.print(" FALLO (rc=");
+    Serial.print(mqtt.state());
+    Serial.println(")");
   }
+  return ok;
 }
 
-/**
- * mqttPublish — Publica el estado actual del sensor en el broker MQTT.
- *
- * El payload JSON es leído por el servicio mqtt_client.py en la Raspberry Pi,
- * que lo persiste en la base de datos SQLite y lo muestra en el dashboard web.
- *
- * retained=false: el broker no guarda el mensaje para nuevos suscriptores.
- * Si se pusiera true, cualquier cliente que se conecte recibiría la última
- * lectura inmediatamente, lo cual puede ser útil pero también puede mostrar
- * datos desactualizados.
- */
-void mqttPublish() {
-  if (!mqttEnabled()) return;
-  mqttReconnect();
-  if (!mqttClient.connected()) return;
+// ================================================================
+// publicarMQTT()  —  Envío de datos del sensor al broker
+// ================================================================
+// Publica el estado completo del sistema en el tópico MQTT_TOPICO.
+// La Raspberry Pi (con mqtt_client.py corriendo) recibe este mensaje,
+// lo parsea y lo almacena en la base de datos para dashboards.
+//
+// FORMATO DEL JSON PUBLICADO:
+//   {
+//     "raw"      : 450,       ← valor crudo del ADC (0–1023)
+//     "percent"  : 51.5,      ← humedad en % (0.0–100.0)
+//     "watering" : false,     ← true si la válvula está abierta ahora
+//     "cooldown" : false,     ← true si está en período de espera
+//     "state"    : "WET"      ← "DRY", "WET", "WATERING" o "COOLDOWN"
+//   }
+//
+// ¿QUÉ ES QoS EN MQTT?
+//   Quality of Service: nivel de garantía de entrega del mensaje.
+//   mqtt.publish() usa QoS 0 por defecto: el mensaje se envía una vez,
+//   sin confirmación. Si el broker no lo recibe, se pierde. Para datos
+//   de sensor periódicos esto es aceptable (viene otro en BACKGROUND_SAMPLE_MS).
+// ================================================================
+void publicarMQTT() {
+  // No hacer nada si no hay conexión activa al broker
+  if (!mqtt.connected()) return;
 
-  String payload = buildJson();
-  mqttClient.publish(MQTT_TOPICO, payload.c_str(), /*retained=*/false);
+  // Determinar el estado del sistema en texto
+  String estado;
+  if      (relayState == WATERING) estado = "WATERING";
+  else if (relayState == COOLDOWN) estado = "COOLDOWN";
+  else if (lastPercent < ON_THRESHOLD_PERCENT) estado = "DRY";
+  else    estado = "WET";
 
-  Serial.print("[MQTT] Publicado en '");
-  Serial.print(MQTT_TOPICO);
-  Serial.print("': ");
-  Serial.println(payload);
+  // Construir el JSON como String de Arduino
+  // c_str() convierte String de Arduino a cadena C (const char*) que
+  // necesita mqtt.publish()
+  String json = "{";
+  json += "\"raw\":"       + String(lastRaw)                                + ",";
+  json += "\"percent\":"   + String(lastPercent, 1)                         + ",";
+  json += "\"watering\":"  + String(relayState == WATERING ? "true":"false") + ",";
+  json += "\"cooldown\":"  + String(relayState == COOLDOWN ? "true":"false") + ",";
+  json += "\"state\":\""   + estado                                         + "\"";
+  json += "}";
+
+  // mqtt.publish(topico, mensaje) retorna true si el mensaje fue encolado OK
+  bool publicado = mqtt.publish(MQTT_TOPICO, json.c_str());
+  Serial.printf("[MQTT] Publicado en %s: %s (%s)\n",
+                MQTT_TOPICO, json.c_str(), publicado ? "OK" : "FALLO");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SETUP — Inicialización (se ejecuta una sola vez al arrancar)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * setup() — Punto de entrada de Arduino para la inicialización.
- *
- * Arduino (y por extensión el SDK del ESP8266) ejecuta setup() una sola vez
- * al encender o reiniciar el microcontrolador. Aquí se configura el hardware
- * y se establecen las conexiones de red antes de entrar al loop principal.
- */
+// ================================================================
+// setup()  —  Inicialización del sistema (se ejecuta UNA SOLA VEZ)
+// ================================================================
+// En Arduino, setup() es la función de arranque. Se ejecuta una vez
+// al encender o resetear el ESP8266. Aquí configuramos todo antes
+// de entrar al bucle principal (loop()).
+// ================================================================
 void setup() {
-  // Iniciar la comunicación serie a 115200 baudios para depuración.
-  // El Monitor Serie de Arduino IDE debe configurarse a la misma velocidad.
-  // 115200 bps es el estándar para el ESP8266 (velocidades mayores pueden
-  // causar errores por la variación de la frecuencia del oscilador interno).
+  // ── Monitor Serie ─────────────────────────────────────────────
+  // Inicia la comunicación serial a 115200 baudios.
+  // Esto nos permite ver mensajes de depuración en el Monitor Serie
+  // de Arduino IDE (Herramientas → Monitor Serie → 115200 baud).
   Serial.begin(115200);
-  delay(100);  // espera breve para que el puerto serie se estabilice
-  Serial.println("\n[EM_server] Invernadero – Monitor de Humedad Suelo");
-  Serial.println("Versión con riego remoto vía MQTT.");
+  Serial.println("\n[INICIO] humedadSueloK8");
 
-  // ── Configurar pines de hardware ───────────────────────────────
-  // INPUT: el pin solo lee tensión, no entrega corriente.
-  // OUTPUT: el pin puede entregar hasta 12 mA en GPIO del ESP8266.
-  // El relé se inicializa LOW (apagado) para evitar abrir la válvula
-  // accidentalmente durante el arranque del sistema.
-  pinMode(PIN_SENSOR_DO, INPUT);
-  pinMode(PIN_RELAY, OUTPUT);
-  digitalWrite(PIN_RELAY, LOW);  // relé apagado al arrancar
-  Serial.println("[HW] Pines configurados. Relé apagado.");
+  // ── Configuración de pines ────────────────────────────────────
+  // pinMode() define si un pin es entrada (INPUT) o salida (OUTPUT).
+  pinMode(PIN_DO,    INPUT);   // DO del sensor: lectura digital (informativo)
+  pinMode(PIN_RELAY, OUTPUT);  // Control del relé: salida digital
+  pinMode(PIN_LED,   OUTPUT);  // LED integrado: salida digital
 
-  // ── Conectar a la red Wi-Fi ────────────────────────────────────
-  // WiFi.begin() inicia el proceso de asociación en segundo plano.
-  // El bucle while espera a que el coprocesador Wi-Fi complete la
-  // autenticación WPA2 y reciba una IP por DHCP (puede tardar 1-5 s).
-  Serial.print("[WiFi] Conectando a ");
-  Serial.print(WIFI_SSID);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  // ── Estado seguro al arranque ─────────────────────────────────
+  // Al arrancar siempre ponemos el relé inactivo para evitar que la
+  // válvula quede abierta por un reinicio inesperado del ESP8266.
+  digitalWrite(PIN_RELAY, LOW);   // LOW → relé inactivo → válvula CERRADA (seguro)
+  digitalWrite(PIN_LED,   HIGH);  // HIGH → LED apagado (active-low: HIGH = apagado)
+
+  // ── Conexión Wi-Fi ────────────────────────────────────────────
+  // WiFi.begin() inicia el proceso de conexión en segundo plano.
+  // El while() espera activamente hasta tener conexión.
+  // WL_CONNECTED es una constante del SDK que indica éxito.
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  Serial.print("[WIFI] Conectando");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
+    Serial.print(".");  // Imprime un punto cada 500ms como indicador de progreso
   }
   Serial.println();
-  Serial.print("[WiFi] Conectado. Dirección IP: ");
-  Serial.println(WiFi.localIP());
+  Serial.print("[WIFI] Conectado. IP: ");
+  Serial.println(WiFi.localIP());  // La IP local para acceder al servidor web
 
-  // ── Configurar cliente MQTT ────────────────────────────────────
-  if (mqttEnabled()) {
-    mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
+  // ── Servidor web ──────────────────────────────────────────────
+  // server.on() asocia una URL con su función manejadora (handler).
+  // server.begin() pone el servidor en escucha en el puerto 80.
+  server.on("/",     handleRoot);  // GET / → página HTML
+  server.on("/json", handleJson);  // GET /json → datos JSON
+  server.begin();
+  Serial.println("[WEB] Servidor iniciado en puerto 80");
 
-    // Registrar la función callback que se llama al recibir mensajes.
-    // DEBE hacerse ANTES de llamar a mqttReconnect()/connect().
-    mqttClient.setCallback(mqttCallback);
-
-    // Ampliar el buffer interno de PubSubClient a 256 bytes.
-    // El buffer por defecto (128 bytes) puede ser insuficiente para
-    // payloads JSON grandes. Si un mensaje excede el buffer, se descarta.
-    mqttClient.setBufferSize(256);
-
-    mqttReconnect();  // primer intento de conexión al broker
-  } else {
-    Serial.println("[MQTT] Deshabilitado (MQTT_SERVER vacío en config.h).");
+  // ── MQTT ──────────────────────────────────────────────────────
+  // Solo configuramos MQTT si el usuario definió un servidor en config.h.
+  // Si MQTT_SERVER es "" → toda la lógica MQTT se omite silenciosamente.
+  if (strlen(MQTT_SERVER) > 0) {
+    mqtt.setServer(MQTT_SERVER, MQTT_PORT);   // IP y puerto del broker
+    mqtt.setCallback(mqttCallback);           // Función que recibirá los mensajes entrantes
+    reconnectMQTT();                          // Primer intento de conexión
   }
 
-  // ── Configurar servidor web ────────────────────────────────────
-  // server.on() registra pares (ruta HTTP, función handler).
-  // El servidor maneja una petición a la vez de forma síncrona.
-  server.on("/",     handleRoot);   // página HTML de estado
-  server.on("/json", handleJson);   // API JSON para integraciones
-  server.onNotFound(handleNotFound); // handler genérico para rutas desconocidas
-  server.begin();
-  Serial.println("[Web] Servidor HTTP iniciado en puerto 80.");
-  Serial.print("[Web] Abre en el navegador: http://");
-  Serial.println(WiFi.localIP());
-
-  // ── Primera lectura y publicación ─────────────────────────────
-  readSensor();
-  updateWatering();
-  mqttPublish();
-  g_lastSample = millis();
-
-  Serial.println("[OK] Sistema inicializado y listo.");
+  // ── Primera lectura del sensor ────────────────────────────────
+  // Hacemos una lectura inicial para que el servidor web tenga datos
+  // reales desde el primer momento (en lugar de mostrar 0%).
+  lastRaw      = readADC();
+  lastPercent  = rawToPercent(lastRaw);
+  lastSampleMs = millis();  // Registrar el instante de esta primera lectura
+  Serial.printf("[ADC] Raw: %d | Humedad: %.1f%%\n", lastRaw, lastPercent);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LOOP — Bucle principal (se ejecuta continuamente)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * loop() — Bucle principal de Arduino.
- *
- * Se ejecuta repetidamente y sin retardo fijo. La filosofía es "no-blocking":
- * ninguna tarea debe detener el procesador por más de unos pocos milisegundos
- * para que las demás tareas sigan respondiendo.
- *
- * Tareas en cada iteración:
- *  1. Atender peticiones HTTP pendientes.
- *  2. Mantener la conexión MQTT y procesar mensajes entrantes (comandos).
- *  3. Evaluar continuamente la lógica de riego (timeouts, fin de cooldown).
- *  4. Cada BACKGROUND_SAMPLE_MS: leer sensor, publicar por MQTT y loguear.
- */
+// ================================================================
+// loop()  —  Bucle principal (se ejecuta CONTINUAMENTE)
+// ================================================================
+// En Arduino, loop() es el corazón del programa. Se llama repetidamente
+// sin parar mientras el ESP8266 está encendido.
+//
+// PRINCIPIO CLAVE: NO BLOQUEANTE
+//   Usamos millis() para temporizar tareas en lugar de delay().
+//   Esto permite que todas las tareas (web, MQTT, sensor, relé) se
+//   ejecuten de forma "paralela" en un solo hilo de ejecución:
+//   cada tarea revisa si "le toca actuar" y si no, cede el control.
+//
+// ORDEN DE EJECUCIÓN EN CADA ITERACIÓN:
+//   1. Atender peticiones HTTP entrantes (servidor web)
+//   2. Mantener la conexión MQTT viva y procesar mensajes entrantes
+//   3. Si pasó BACKGROUND_SAMPLE_MS: leer sensor y publicar por MQTT
+//   4. Evaluar la máquina de estados del relé y actualizar el LED
+// ================================================================
 void loop() {
-  // ── 1. Servidor web ────────────────────────────────────────────
-  // handleClient() procesa hasta una petición HTTP por llamada.
-  // Llamarlo en cada iteración del loop garantiza tiempos de respuesta bajos.
+
+  // ── 1. Servidor web ───────────────────────────────────────────
+  // handleClient() revisa si hay alguna petición HTTP pendiente.
+  // Si hay una, la procesa llamando al handler correspondiente (handleRoot
+  // o handleJson). Si no hay nada, retorna inmediatamente sin bloquear.
   server.handleClient();
 
-  // ── 2. Cliente MQTT ────────────────────────────────────────────
-  if (mqttEnabled()) {
-    // Reconectar si la conexión TCP se cayó (p.ej. reinicio del broker).
-    if (!mqttClient.connected()) mqttReconnect();
+  // ── 2. MQTT: mantener conexión y procesar mensajes entrantes ──
+  if (strlen(MQTT_SERVER) > 0) {
+    unsigned long now = millis();
 
-    // mqttClient.loop() es IMPRESCINDIBLE:
-    //   • Lee bytes del socket TCP y ensambla mensajes MQTT entrantes.
-    //   • Llama a mqttCallback() para cada mensaje en el tópico suscrito.
-    //   • Envía PINGREQ al broker para mantener el keep-alive.
-    //   Sin esta llamada, los mensajes entrantes (comandos de riego) nunca
-    //   se procesarían y el broker desconectaría al cliente por timeout.
-    mqttClient.loop();
+    // Si la conexión se perdió, intentar reconectar cada 5 segundos.
+    // Usamos el patrón "non-blocking retry" con timestamp:
+    //   - Guardamos cuándo fue el último intento (lastMqttAttemptMs)
+    //   - Solo reintentamos si pasaron >= MQTT_RECONNECT_INTERVAL_MS ms
+    if (!mqtt.connected() && (now - lastMqttAttemptMs >= MQTT_RECONNECT_INTERVAL_MS)) {
+      lastMqttAttemptMs = now;
+      reconnectMQTT();
+    }
+
+    // mqtt.loop() es OBLIGATORIO en cada iteración cuando se usa PubSubClient.
+    // Procesa los mensajes entrantes (llama a mqttCallback si llegó algo)
+    // y envía los keepalive MQTT para que el broker no cierre la conexión.
+    mqtt.loop();
   }
 
-  // ── 3. Lógica de riego (evaluación continua) ───────────────────
-  // Se llama en cada iteración para detectar rápidamente el fin del tiempo
-  // de riego (DURACION_RIEGO_MS) y el fin del cooldown (COOLDOWN_MS),
-  // sin depender del intervalo de muestreo periódico.
-  updateWatering();
-
-  // ── 4. Muestreo periódico y publicación MQTT ───────────────────
-  // La comparación (now - g_lastSample >= BACKGROUND_SAMPLE_MS) es
-  // safe ante desbordamiento de millis() gracias a la aritmética sin signo.
+  // ── 3. Lectura periódica del sensor y publicación MQTT ────────
   unsigned long now = millis();
-  if (now - g_lastSample >= BACKGROUND_SAMPLE_MS) {
-    g_lastSample = now;
 
-    readSensor();     // actualiza g_state.raw y g_state.percent
-    updateWatering(); // re-evalúa riego con la nueva lectura
-    mqttPublish();    // envía datos al broker MQTT
+  // Patrón "temporizador no bloqueante": verificamos si transcurrió
+  // el intervalo deseado comparando el tiempo actual con la última lectura.
+  // BACKGROUND_SAMPLE_MS está definido en config.h (por defecto 3000 ms).
+  if (now - lastSampleMs >= BACKGROUND_SAMPLE_MS) {
+    lastSampleMs = now;              // Actualizar el momento de la última lectura
 
-    // Log por Serial para depuración con el Monitor Serie de Arduino IDE.
-    Serial.print("[Sensor] raw=");
-    Serial.print(g_state.raw);
-    Serial.print("  pct=");
-    Serial.print(g_state.percent, 1);
-    Serial.print("%  state=");
-    Serial.print(stateLabel(g_state.percent));
-    Serial.print("  riego=");
-    Serial.print(g_state.watering ? "SI" : "NO");
-    Serial.print("  cooldown=");
-    Serial.println(g_state.cooldown ? "SI" : "NO");
+    lastRaw     = readADC();         // Leer el ADC con promediado
+    lastPercent = rawToPercent(lastRaw);  // Convertir a porcentaje de humedad
+
+    Serial.printf("[ADC] Raw: %d | Humedad: %.1f%%\n", lastRaw, lastPercent);
+
+    // Publicar los datos actuales al broker MQTT para que la Raspberry Pi
+    // los almacene en la base de datos y los muestre en el dashboard.
+    publicarMQTT();
   }
+
+  // ── 4. Control del relé y LED según el estado de humedad ──────
+  // updateRelay() evalúa la máquina de estados con el porcentaje actual
+  // y decide si debe abrir/cerrar la válvula y encender/apagar el LED.
+  // Se llama en CADA iteración del loop() (no solo cuando hay nueva lectura)
+  // para que las transiciones de estado (ej: fin del tiempo de riego)
+  // se detecten con precisión temporal, sin esperar al siguiente muestreo.
+  updateRelay(lastPercent);
 }

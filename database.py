@@ -152,8 +152,8 @@ def get_readings_history(
         conditions.append("field = ?")
         params.append(field)
     if hours is not None:
-        cutoff = (datetime.now(_TZ_GUATEMALA) - timedelta(hours=hours)).strftime(
-            "%Y-%m-%dT%H:%M:%S-06:00"
+        cutoff = (datetime.now(_TZ_GUATEMALA) - timedelta(hours=hours)).isoformat(
+            timespec="seconds"
         )
         conditions.append("recorded_at >= ?")
         params.append(cutoff)

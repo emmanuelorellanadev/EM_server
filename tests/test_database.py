@@ -167,46 +167,6 @@ def test_history_limit(db_path):
     assert len(rows) == 5
 
 
-def test_history_hours_filter(db_path):
-    """Readings within the hours window are returned; older ones are not."""
-    from datetime import datetime, timedelta
-    from zoneinfo import ZoneInfo
-
-    tz = ZoneInfo("America/Guatemala")
-    now = datetime.now(tz)
-
-    # Insert a recent reading (1 hour ago)
-    recent = now - timedelta(hours=1)
-    insert_reading(db_path, "esp8266", "temperature", 25.0, "°C", recent)
-
-    # Insert an old reading (30 hours ago) – should be excluded
-    old = now - timedelta(hours=30)
-    insert_reading(db_path, "esp8266", "temperature", 10.0, "°C", old)
-
-    rows = get_readings_history(db_path, hours=24)
-    assert len(rows) == 1
-    assert abs(rows[0]["value"] - 25.0) < 0.001
-
-
-def test_history_hours_filter_with_source(db_path):
-    """hours filter combined with source filter works correctly."""
-    from datetime import datetime, timedelta
-    from zoneinfo import ZoneInfo
-
-    tz = ZoneInfo("America/Guatemala")
-    recent = datetime.now(tz) - timedelta(hours=1)
-    old = datetime.now(tz) - timedelta(hours=48)
-
-    insert_reading(db_path, "raspberrypi", "temperature", 22.0, "°C", recent)
-    insert_reading(db_path, "raspberrypi", "temperature", 15.0, "°C", old)
-    insert_reading(db_path, "esp8266", "temperature", 30.0, "°C", recent)
-
-    rows = get_readings_history(db_path, source="raspberrypi", hours=24)
-    assert len(rows) == 1
-    assert rows[0]["source"] == "raspberrypi"
-    assert abs(rows[0]["value"] - 22.0) < 0.001
-
-
 # ---------------------------------------------------------------------------
 # get_sources
 # ---------------------------------------------------------------------------

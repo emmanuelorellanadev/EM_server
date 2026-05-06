@@ -32,17 +32,29 @@ function fieldIcon(field) {
 // ------------------------------------------------------------------ //
 let trendChart = null;
 
-function initTrendChart(latestData) {
+// Fields to plot in the trend chart, keyed by sensor source name.
+// Sources not listed here fall back to DEFAULT_CHART_FIELDS.
+const SOURCE_CHART_FIELDS = {
+  esp8266:     ['soil_humidity', 'on_threshold_percent'],
+  raspberrypi: ['temperature', 'humidity', 'pressure'],
+};
+const DEFAULT_CHART_FIELDS = ['temperature', 'humidity'];
+
+function getChartFields(source) {
+  return SOURCE_CHART_FIELDS[source] || DEFAULT_CHART_FIELDS;
+}
+
+function initTrendChart(data) {
   const canvas = document.getElementById('trend-chart');
-  if (!canvas || !latestData || latestData.length === 0) return;
+  if (!canvas || !data || data.length === 0) return;
 
   // Group by field for the legend
-  const fields = [...new Set(latestData.map(r => r.field))];
+  const fields = [...new Set(data.map(r => r.field))];
   const palette = ['#4caf50', '#1e88e5', '#ff8f00', '#e53935', '#6a1b9a', '#6d4c41'];
 
   const datasets = fields.map((field, i) => ({
     label: fieldLabel(field),
-    data: latestData
+    data: data
       .filter(r => r.field === field)
       .map(r => ({ x: r.recorded_at, y: r.value })),
     borderColor: palette[i % palette.length],
@@ -51,6 +63,11 @@ function initTrendChart(latestData) {
     pointRadius: 3,
     fill: false,
   }));
+
+  if (trendChart) {
+    trendChart.destroy();
+    trendChart = null;
+  }
 
   trendChart = new Chart(canvas, {
     type: 'line',
@@ -67,7 +84,7 @@ function initTrendChart(latestData) {
       scales: {
         x: {
           type: 'category',
-          title: { display: true, text: 'Timestamp (UTC)' },
+          title: { display: true, text: 'Timestamp (UTC-6)' },
           ticks: { maxRotation: 30, maxTicksLimit: 10 },
         },
         y: {
@@ -165,23 +182,43 @@ async function sendWaterCommand(btn) {
 // Load trend chart from history API
 // ------------------------------------------------------------------ //
 
-// Only these two fields are shown in the trend chart.
-const CHART_FIELDS = ['soil_humidity', 'on_threshold_percent'];
+// How many hours of history to display in the trend chart.
+const CHART_HOURS = 24;
+// Safety cap: 24 h × 120 readings/h (one every 30 s) per field + margin.
+const CHART_LIMIT = 3000;
 
 /**
- * Fetches the last 50 readings for each chart field separately so that the
- * most-recent value per field always matches what is shown on the sensor
- * cards, then renders the trend chart.
+ * Fetches the last CHART_HOURS hours of data for each field relevant to the
+ * given sensor source, then re-renders the trend chart.
+ *
+ * @param {string} source  The active sensor source (e.g. "esp8266" or
+ *                         "raspberrypi").  When falsy, the chart is cleared.
  */
-async function loadTrendChart() {
+async function loadTrendChart(source) {
+  if (!source) return;
+
+  const chartFields = getChartFields(source);
+
+  // Update the chart section heading to reflect the active source / window.
+  const titleEl = document.getElementById('chart-title');
+  if (titleEl) {
+    const fieldNames = chartFields.map(fieldLabel).join(', ');
+    titleEl.textContent =
+      `Tendencias – ${fieldNames} — ${source.toUpperCase()} (últimas ${CHART_HOURS} horas)`;
+  }
+
   try {
     const responses = await Promise.all(
-      CHART_FIELDS.map(f => fetch(`/api/history?field=${f}&limit=50`))
+      chartFields.map(f =>
+        fetch(
+          `/api/history?source=${encodeURIComponent(source)}&field=${encodeURIComponent(f)}&hours=${CHART_HOURS}&limit=${CHART_LIMIT}`
+        )
+      )
     );
     const arrays = await Promise.all(
       responses.map((r, i) => {
         if (!r.ok) {
-          console.error(`loadTrendChart: API returned ${r.status} for ${CHART_FIELDS[i]}`);
+          console.error(`loadTrendChart: API returned ${r.status} for ${chartFields[i]}`);
           return [];
         }
         return r.json();

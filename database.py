@@ -128,8 +128,21 @@ def get_readings_history(
     source: str | None = None,
     field: str | None = None,
     limit: int = 100,
+    hours: int | None = None,
 ) -> list[dict]:
-    """Return recent readings, optionally filtered by source and/or field."""
+    """Return recent readings, optionally filtered by source, field, and/or time window.
+
+    Args:
+        db_path: Path to the SQLite database file.
+        source:  Filter to a specific sensor source (e.g. ``"esp8266"``).
+        field:   Filter to a specific field name (e.g. ``"temperature"``).
+        limit:   Maximum number of rows to return (applied after other filters).
+        hours:   When provided, only readings from the last *N* hours are
+                 returned.  The cutoff timestamp is computed in Guatemala time
+                 (UTC-6) to match the timezone used when data is stored.
+    """
+    from datetime import timedelta
+
     conditions: list[str] = []
     params: list = []
     if source:
@@ -138,6 +151,12 @@ def get_readings_history(
     if field:
         conditions.append("field = ?")
         params.append(field)
+    if hours is not None:
+        cutoff = (datetime.now(_TZ_GUATEMALA) - timedelta(hours=hours)).isoformat(
+            timespec="seconds"
+        )
+        conditions.append("recorded_at >= ?")
+        params.append(cutoff)
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     sql = f"""
         SELECT source, field, value, unit, recorded_at

@@ -92,6 +92,26 @@ def test_api_history_with_filter(client):
     assert all(r["source"] == "esp8266" for r in data)
 
 
+def test_api_history_hours_filter(client):
+    """?hours=24 returns only readings within the last 24 h."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    c, db = client
+    tz = ZoneInfo("America/Guatemala")
+    recent = datetime.now(tz) - timedelta(hours=1)
+    old = datetime.now(tz) - timedelta(hours=48)
+
+    database.insert_reading(db, "esp8266", "temperature", 25.0, "°C", recent)
+    database.insert_reading(db, "esp8266", "temperature", 10.0, "°C", old)
+
+    resp = c.get("/api/history?source=esp8266&field=temperature&hours=24&limit=100")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert len(data) == 1
+    assert abs(data[0]["value"] - 25.0) < 0.001
+
+
 def test_api_sources_empty(client):
     c, _ = client
     resp = c.get("/api/sources")

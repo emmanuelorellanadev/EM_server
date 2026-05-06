@@ -124,7 +124,11 @@ def api_history():
     source = request.args.get("source")
     field = request.args.get("field")
     limit = int(request.args.get("limit", 100))
-    return jsonify(get_readings_history(_db_path, source=source, field=field, limit=limit))
+    hours_raw = request.args.get("hours")
+    hours = int(hours_raw) if hours_raw else None
+    return jsonify(
+        get_readings_history(_db_path, source=source, field=field, limit=limit, hours=hours)
+    )
 
 
 @app.route("/api/sources")

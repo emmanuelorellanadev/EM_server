@@ -1,4 +1,4 @@
 paho-mqtt==1.6.1
 Flask==2.3.3
 Werkzeug==2.3.7
-sense-hat==2.3.0
+sense-hat>=2.3.1,<3

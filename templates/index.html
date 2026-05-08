@@ -72,7 +72,7 @@
 
 <section class="chart-section">
   <div class="section-header">
-    <h2 id="chart-title">Tendencias</h2>
+    <h2>Tendencias – Humedad de Suelo y Umbral de Activación (últimas 50 lecturas)</h2>
   </div>
   <canvas id="trend-chart" height="100"></canvas>
 </section>
@@ -82,15 +82,13 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
   const latestData = {{ latest | tojson }};
-  const initialSource = {{ (sources[0] if sources else '') | tojson }};
-  if (initialSource) loadTrendChart(initialSource);
+  loadTrendChart();
 
   function showSource(src, event) {
     document.querySelectorAll('.source-panel').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('panel-' + src).classList.add('active');
     event.target.classList.add('active');
-    loadTrendChart(src);
   }
 
   async function refreshLatest() {

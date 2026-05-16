@@ -120,6 +120,15 @@ def test_index_shows_watering_status(client):
     assert b"status-on" in resp.data
 
 
+def test_index_watering_card_has_last_watering_placeholder(client):
+    c, db = client
+    database.insert_reading(db, "esp8266", "watering", 1.0)
+    database.insert_reading(db, "esp8266", "last_watering_at_epoch", 1735689600.0, "unix_s")
+    resp = c.get("/")
+    assert resp.status_code == 200
+    assert b"last-watering-time" in resp.data
+
+
 def test_index_shows_online_status(client):
     c, db = client
     database.insert_reading(db, "esp8266", "online", 1.0)
@@ -141,6 +150,17 @@ def test_api_latest_includes_boolean_fields(client):
     assert "cooldown" in fields
     online_row = next(r for r in data if r["field"] == "online")
     assert online_row["value"] in (0.0, 1.0)
+
+
+def test_index_hides_internal_last_watering_fields(client):
+    c, db = client
+    database.insert_reading(db, "esp8266", "watering", 0.0)
+    database.insert_reading(db, "esp8266", "last_watering_at_epoch", 1735689600.0, "unix_s")
+    database.insert_reading(db, "esp8266", "last_watered_sec", 20.0)
+    resp = c.get("/")
+    assert resp.status_code == 200
+    assert b"Last Watering At Epoch" not in resp.data
+    assert b"Last Watered Sec" not in resp.data
 
 
 # ---------------------------------------------------------------------------

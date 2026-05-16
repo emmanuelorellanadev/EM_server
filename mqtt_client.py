@@ -18,7 +18,7 @@ import time
 
 import paho.mqtt.client as mqtt
 
-from database import init_db, insert_readings_from_payload
+from database import init_db, insert_reading, insert_readings_from_payload
 
 logging.basicConfig(
     level=logging.INFO,
@@ -89,6 +89,21 @@ def _on_message(client, userdata, msg):
         payload = {mappings.get(k, k): v for k, v in payload.items()}
 
     logger.debug("Message from %s: %s", source, payload)
+    last_watered_sec = payload.get("last_watered_sec")
+    if isinstance(last_watered_sec, (int, float)):
+        if last_watered_sec >= 0:
+            now_ts = time.time()
+            last_watering_at_epoch = now_ts - float(last_watered_sec)
+        else:
+            # Sentinel used by ESP8266 when no irrigation has happened yet.
+            last_watering_at_epoch = -1.0
+        insert_reading(
+            db_path,
+            source,
+            "last_watering_at_epoch",
+            last_watering_at_epoch,
+            "unix_s",
+        )
     insert_readings_from_payload(db_path, source, payload)
     logger.info("Stored reading from source '%s'", source)
 

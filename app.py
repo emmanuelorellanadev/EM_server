@@ -63,6 +63,7 @@ _FIELD_LABELS = {
 
 # Fields that represent boolean on/off state (stored as 1.0 / 0.0)
 BOOLEAN_FIELDS = {"watering", "online"}
+HIDDEN_FIELDS = {"last_watered_sec", "last_watering_at_epoch"}
 
 
 @app.template_global()
@@ -78,6 +79,11 @@ def field_label(field: str) -> str:
 @app.template_global()
 def is_boolean_field(field: str) -> bool:
     return field in BOOLEAN_FIELDS
+
+
+@app.template_global()
+def should_render_field(field: str) -> bool:
+    return field not in HIDDEN_FIELDS
 
 _config: dict = {}
 _db_path: str = "em_server.db"

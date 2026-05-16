@@ -19,6 +19,7 @@ const FIELD_META = {
 
 // Fields rendered as on/off rather than a number
 const BOOLEAN_FIELDS = new Set(['watering', 'online']);
+const LAST_WATERING_FIELD = 'last_watering_at_epoch';
 
 function fieldLabel(field) {
   return (FIELD_META[field] || {}).label || field;
@@ -26,6 +27,14 @@ function fieldLabel(field) {
 
 function fieldIcon(field) {
   return (FIELD_META[field] || {}).icon || '📊';
+}
+
+function formatLastWatering(epochSeconds) {
+  if (!Number.isFinite(epochSeconds) || epochSeconds < 0) {
+    return 'Último riego: sin registro';
+  }
+  const dt = new Date(epochSeconds * 1000);
+  return `Último riego: ${dt.toLocaleString('es-GT', { hour12: false, timeZone: 'America/Guatemala' })}`;
 }
 
 // ------------------------------------------------------------------ //
@@ -83,6 +92,13 @@ function initTrendChart(latestData) {
 // Live card update (called after /api/latest refresh)
 // ------------------------------------------------------------------ //
 function updateCards(data) {
+  const lastWateringBySource = {};
+  data.forEach(r => {
+    if (r.field === LAST_WATERING_FIELD) {
+      lastWateringBySource[r.source] = Number(r.value);
+    }
+  });
+
   // Re-render only the value + time inside each existing card
   data.forEach(r => {
     const panel = document.getElementById(`panel-${r.source}`);
@@ -103,6 +119,10 @@ function updateCards(data) {
         }
       }
       if (timeEl) timeEl.textContent = r.recorded_at;
+      if (r.field === 'watering') {
+        const extraEl = card.querySelector('.last-watering-time');
+        if (extraEl) extraEl.textContent = formatLastWatering(lastWateringBySource[r.source]);
+      }
     });
   });
 }

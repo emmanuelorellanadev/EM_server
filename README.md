@@ -167,7 +167,8 @@ El ESP8266 publica en `sensors/esp8266` cada 60 s (configurable):
   "percent":  42.3,     ← humedad de suelo (0% = seco, 100% = mojado)
   "state":    "WET",    ← "DRY" | "WET" | "WATERING" | "COOLDOWN"
   "watering": false,    ← ¿está el riego activo?
-  "cooldown": false     ← ¿en período de espera post-riego?
+  "cooldown": false,    ← ¿en período de espera post-riego?
+  "last_watered_sec": 120 ← segundos desde el último riego (-1 = nunca)
 }
 ```
 
@@ -175,6 +176,7 @@ El servidor aplica el mapeo configurado en `config.json`:
 - `percent` → se guarda como campo `soil_humidity`
 - `raw` → se guarda como campo `soil_raw`
 - `watering` y `cooldown` (booleanos) → se guardan como `1.0` / `0.0`
+- `last_watered_sec` → se guarda y además se transforma a `last_watering_at_epoch` (timestamp UNIX) para mostrar la hora del último riego
 - `state` (cadena de texto) → se ignora en la base de datos
 
 #### Payload MQTT del Sense HAT

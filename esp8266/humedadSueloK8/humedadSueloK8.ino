@@ -595,6 +595,7 @@ bool ensureWiFiConnected() {
 //     "percent"             : 51.5,  ← humedad en % (0.0–100.0)
 //     "watering"            : false, ← true si la válvula está abierta ahora
 //     "state"               : "WET", ← "DRY", "WET", "WATERING" o "COOLDOWN"
+//     "last_watered_sec"    : 120,   ← segundos desde el último riego (-1 nunca)
 //     "on_threshold_percent": 35,    ← umbral (%) que activa el relé
 //     "relay_on_time_s"     : 1.0    ← duración de cada ciclo de riego en segundos
 //   }
@@ -615,6 +616,7 @@ void publicarMQTT() {
   else if (relayState == COOLDOWN) estado = "COOLDOWN";
   else if (lastPercent < ON_THRESHOLD_PERCENT) estado = "DRY";
   else    estado = "WET";
+  long secsAgo = (lastWaterEndMs == 0) ? -1L : (long)((millis() - lastWaterEndMs) / 1000UL);
 
   // Construir el JSON como String de Arduino
   // c_str() convierte String de Arduino a cadena C (const char*) que
@@ -623,6 +625,7 @@ void publicarMQTT() {
   json += "\"percent\":"              + String(lastPercent, 1)                         + ",";
   json += "\"watering\":"             + String(relayState == WATERING ? "true":"false") + ",";
   json += "\"state\":\""              + estado                                         + "\",";
+  json += "\"last_watered_sec\":"     + String(secsAgo)                                + ",";
   json += "\"on_threshold_percent\":" + String(ON_THRESHOLD_PERCENT)                   + ",";
   json += "\"relay_on_time_s\":"      + String((float)RELAY_ON_TIME_MS / 1000.0f, 1);
   json += "}";

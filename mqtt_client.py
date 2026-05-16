@@ -15,10 +15,12 @@ import os
 import signal
 import sys
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import paho.mqtt.client as mqtt
 
-from database import init_db, insert_readings_from_payload
+from database import init_db, insert_reading, insert_readings_from_payload
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,6 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger("mqtt_client")
 
 _running = True
+_TZ_GUATEMALA = ZoneInfo("America/Guatemala")
 
 
 def _load_config(path: str) -> dict:
@@ -89,6 +92,17 @@ def _on_message(client, userdata, msg):
         payload = {mappings.get(k, k): v for k, v in payload.items()}
 
     logger.debug("Message from %s: %s", source, payload)
+    last_watered_sec = payload.get("last_watered_sec")
+    if isinstance(last_watered_sec, (int, float)) and last_watered_sec >= 0:
+        now_ts = datetime.now(_TZ_GUATEMALA).timestamp()
+        last_watering_at_epoch = now_ts - float(last_watered_sec)
+        insert_reading(
+            db_path,
+            source,
+            "last_watering_at_epoch",
+            last_watering_at_epoch,
+            "unix_s",
+        )
     insert_readings_from_payload(db_path, source, payload)
     logger.info("Stored reading from source '%s'", source)
 

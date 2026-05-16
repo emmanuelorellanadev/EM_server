@@ -126,6 +126,7 @@ main {
 .card-value { font-size: 1.5rem; font-weight: 700; color: var(--text); }
 .card-value small { font-size: .75rem; font-weight: 400; color: var(--muted); }
 .card-time { font-size: .7rem; color: var(--muted); }
+.card-extra { font-size: .75rem; color: var(--muted); }
 
 /* ---- Sensor colour accents ---------------------------------------- */
 .temperature .card-icon { color: #e53935; }

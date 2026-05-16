@@ -244,6 +244,12 @@
 // este tópico para activar el riego de forma remota.
 #define MQTT_TOPICO_CMD  "commands/esp8266"
 
+// Tópico de PRESENCIA del dispositivo (online/offline).
+// El ESP8266 publica "online" con retain al conectarse y define un
+// Last Will "offline" para que el broker lo publique si el dispositivo
+// se cae sin desconectarse limpiamente.
+#define MQTT_STATUS_TOPIC "devices/esp8266/status"
+
 // Credenciales de autenticación del broker MQTT.
 // Dejar ambas vacías ("") si el broker Mosquitto no requiere usuario/contraseña.
 // Para configurar autenticación en Mosquitto: ver mosquitto_passwd.

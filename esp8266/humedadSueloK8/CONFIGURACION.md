@@ -120,7 +120,9 @@ Valores posibles de `state`: `WET`, `DRY`, `WATERING`, `COOLDOWN`.
 | `MQTT_SERVER`     | `"192.168.1.100"`        | IP o hostname del broker (vacío `""` → MQTT inactivo)|
 | `MQTT_PORT`       | 1883                     | Puerto TCP del broker                                |
 | `MQTT_CLIENT_ID`  | `"esp8266_suelo"`        | ID único del cliente (único por dispositivo)         |
-| `MQTT_TOPICO`     | `"humedadsuelo/datos"`   | Tópico donde se publican los datos                   |
+| `MQTT_TOPICO`     | `"sensors/esp8266"`      | Tópico donde se publican los datos                   |
+| `MQTT_TOPICO_CMD` | `"commands/esp8266"`     | Tópico donde escucha comandos remotos                |
+| `MQTT_STATUS_TOPIC` | `"devices/esp8266/status"` | Tópico de presencia (`online`/`offline`)          |
 | `MQTT_USER`       | `""`                     | Usuario del broker (vacío si no requiere auth)       |
 | `MQTT_PASS_BROKER`| `""`                     | Contraseña del broker (vacío si no requiere auth)    |
 
@@ -129,6 +131,14 @@ Valores posibles de `state`: `WET`, `DRY`, `WATERING`, `COOLDOWN`.
 Si el broker no está disponible al arrancar, el firmware reintenta la
 conexión cada `MQTT_RECONNECT_INTERVAL_MS` (5 s) sin bloquear el
 servidor web ni el control del riego.
+
+Al reconectar:
+- el firmware vuelve a suscribirse a `MQTT_TOPICO_CMD`,
+- publica `online` (retained) en `MQTT_STATUS_TOPIC`,
+- y envía de inmediato el último payload de sensores.
+
+Si el dispositivo se reinicia bruscamente o pierde energía, el broker
+publicará `offline` por LWT en `MQTT_STATUS_TOPIC`.
 
 ### Deshabilitar MQTT
 
@@ -152,5 +162,6 @@ config.h
 ├── ADC            → ANALOG_SAMPLES / ANALOG_DELAY_MS
 ├── Muestreo       → BACKGROUND_SAMPLE_MS
 └── MQTT           → MQTT_SERVER / MQTT_PORT / MQTT_CLIENT_ID /
-                     MQTT_TOPICO / MQTT_USER / MQTT_PASS_BROKER
+                     MQTT_TOPICO / MQTT_TOPICO_CMD / MQTT_STATUS_TOPIC /
+                     MQTT_USER / MQTT_PASS_BROKER
 ```

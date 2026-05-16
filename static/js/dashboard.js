@@ -9,6 +9,7 @@ const FIELD_META = {
   temperature:          { label: 'Temperatura',              icon: '🌡️'  },
   humidity:             { label: 'Humedad Ambiental',         icon: '💧'  },
   soil_humidity:        { label: 'Humedad de Suelo',          icon: '🌱'  },
+  online:               { label: 'Conectado MQTT',            icon: '📡'  },
   light:                { label: 'Iluminación',               icon: '☀️'  },
   pressure:             { label: 'Presión Atmosférica',       icon: '🌀'  },
   watering:             { label: 'Riego Activo',              icon: '🚿'  },
@@ -17,7 +18,7 @@ const FIELD_META = {
 };
 
 // Fields rendered as on/off rather than a number
-const BOOLEAN_FIELDS = new Set(['watering']);
+const BOOLEAN_FIELDS = new Set(['watering', 'online']);
 
 function fieldLabel(field) {
   return (FIELD_META[field] || {}).label || field;

@@ -323,6 +323,11 @@ cp esp8266/humedadSueloK8/config.example.h \
 El ESP8266 publicará automáticamente en `sensors/esp8266` cada 60 s
 (ajustable con `BACKGROUND_SAMPLE_MS` en `config.h`).
 
+Además, desde esta versión:
+- publica su estado de presencia en `devices/esp8266/status` (`online`/`offline`, retain),
+- usa LWT para marcar `offline` en caídas inesperadas,
+- y envía una publicación inmediata al reconectar (no espera al siguiente intervalo).
+
 ---
 
 ## Configuración (config.json)
@@ -332,6 +337,7 @@ El ESP8266 publicará automáticamente en `sensors/esp8266` cada 60 s
 | `mqtt.broker` | Dirección del broker MQTT | `localhost` |
 | `mqtt.port` | Puerto del broker | `1883` |
 | `mqtt.username` / `password` | Credenciales (vacío = sin auth) | `""` |
+| `mqtt.topics.device_status` | Tópico wildcard de presencia de dispositivos | `devices/+/status` |
 | `database.path` | Ruta del archivo SQLite | `em_server.db` |
 | `web.port` | Puerto del dashboard Flask | `5000` |
 | `sense_hat.publish_interval_seconds` | Intervalo del Sense HAT | `30` |
@@ -384,4 +390,3 @@ sudo systemctl restart em-mqtt-client
 # Logs en vivo
 journalctl -u em-mqtt-client -f
 ```
-

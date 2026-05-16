@@ -120,14 +120,27 @@ def test_index_shows_watering_status(client):
     assert b"status-on" in resp.data
 
 
+def test_index_shows_online_status(client):
+    c, db = client
+    database.insert_reading(db, "esp8266", "online", 1.0)
+    resp = c.get("/")
+    assert resp.status_code == 200
+    assert b"Conectado MQTT" in resp.data
+    assert b"status-on" in resp.data
+
+
 def test_api_latest_includes_boolean_fields(client):
     c, db = client
     database.insert_reading(db, "esp8266", "watering", 0.0)
+    database.insert_reading(db, "esp8266", "online", 1.0)
     database.insert_reading(db, "esp8266", "cooldown", 1.0)
     data = c.get("/api/latest").get_json()
     fields = {r["field"] for r in data}
     assert "watering" in fields
+    assert "online" in fields
     assert "cooldown" in fields
+    online_row = next(r for r in data if r["field"] == "online")
+    assert online_row["value"] in (0.0, 1.0)
 
 
 # ---------------------------------------------------------------------------

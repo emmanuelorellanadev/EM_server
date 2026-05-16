@@ -112,15 +112,24 @@ ESP8266WebServer server(80);
 WiFiClient   wifiClient;
 PubSubClient mqtt(wifiClient);  // mqtt es el objeto que publica/suscribe
 
+// Client ID MQTT derivado dinámicamente para evitar colisiones entre
+// dispositivos que compartan el mismo config.h.
+char mqttClientIdDynamic[32] = {0};
+
 // Temporizador de reconexión MQTT.
 // millis() devuelve los ms transcurridos desde el arranque (tipo unsigned long).
 // Guardamos el instante del último intento de reconexión para no bloquear
 // el loop() mientras esperamos entre reintentos.
 unsigned long lastMqttAttemptMs = 0;
 
+// Temporizador de reconexión Wi-Fi (runtime).
+unsigned long lastWifiAttemptMs = 0;
+
 // Intervalo mínimo entre intentos de reconexión MQTT (5 segundos).
 // UL = unsigned long literal, evita desbordamientos en aritmética de tiempo.
 #define MQTT_RECONNECT_INTERVAL_MS 5000UL
+#define WIFI_RECONNECT_INTERVAL_MS 5000UL
+#define WIFI_BOOT_TIMEOUT_MS      30000UL
 
 // ================================================================
 // MÁQUINA DE ESTADOS DEL RIEGO
@@ -512,9 +521,23 @@ bool reconnectMQTT() {
   // strlen() == 0 significa cadena vacía → sin autenticación.
   bool ok;
   if (strlen(MQTT_USER) > 0) {
-    ok = mqtt.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASS_BROKER);
+    ok = mqtt.connect(
+      mqttClientIdDynamic,
+      MQTT_USER,
+      MQTT_PASS_BROKER,
+      MQTT_STATUS_TOPIC,
+      1,
+      true,
+      "offline"
+    );
   } else {
-    ok = mqtt.connect(MQTT_CLIENT_ID);  // Conexión anónima (sin usuario/contraseña)
+    ok = mqtt.connect(
+      mqttClientIdDynamic,
+      MQTT_STATUS_TOPIC,
+      1,
+      true,
+      "offline"
+    );  // Conexión anónima (sin usuario/contraseña)
   }
 
   if (ok) {
@@ -525,6 +548,14 @@ bool reconnectMQTT() {
     // Suficiente para comandos de riego donde la latencia importa poco.
     mqtt.subscribe(MQTT_TOPICO_CMD);
     Serial.printf("[MQTT] Suscrito a %s\n", MQTT_TOPICO_CMD);
+
+    // Marcar presencia online con mensaje retained para observabilidad.
+    mqtt.publish(MQTT_STATUS_TOPIC, "online", true);
+    Serial.printf("[MQTT] Presencia online publicada en %s\n", MQTT_STATUS_TOPIC);
+
+    // Publicar inmediatamente la última lectura para evitar "silencio"
+    // tras reconexión o reinicio (no esperar BACKGROUND_SAMPLE_MS).
+    publicarMQTT();
   } else {
     // mqtt.state() retorna un código de error numérico:
     //  -4: MQTT_CONNECTION_TIMEOUT   -3: MQTT_CONNECTION_LOST
@@ -537,6 +568,19 @@ bool reconnectMQTT() {
     Serial.println(")");
   }
   return ok;
+}
+
+bool ensureWiFiConnected() {
+  if (WiFi.status() == WL_CONNECTED) return true;
+
+  unsigned long now = millis();
+  if (now - lastWifiAttemptMs < WIFI_RECONNECT_INTERVAL_MS) return false;
+
+  lastWifiAttemptMs = now;
+  Serial.println("[WIFI] Desconectado. Reintentando conexión...");
+  WiFi.disconnect();
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  return false;
 }
 
 // ================================================================
@@ -618,17 +662,22 @@ void setup() {
 
   // ── Conexión Wi-Fi ────────────────────────────────────────────
   // WiFi.begin() inicia el proceso de conexión en segundo plano.
-  // El while() espera activamente hasta tener conexión.
-  // WL_CONNECTED es una constante del SDK que indica éxito.
+  // Esperamos hasta WIFI_BOOT_TIMEOUT_MS para no bloquear indefinidamente.
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   Serial.print("[WIFI] Conectando");
-  while (WiFi.status() != WL_CONNECTED) {
+  unsigned long wifiBootStart = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - wifiBootStart < WIFI_BOOT_TIMEOUT_MS)) {
     delay(500);
     Serial.print(".");  // Imprime un punto cada 500ms como indicador de progreso
   }
-  Serial.println();
-  Serial.print("[WIFI] Conectado. IP: ");
-  Serial.println(WiFi.localIP());  // La IP local para acceder al servidor web
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println();
+    Serial.print("[WIFI] Conectado. IP: ");
+    Serial.println(WiFi.localIP());  // La IP local para acceder al servidor web
+  } else {
+    Serial.println();
+    Serial.println("[WIFI] Timeout inicial. El loop seguirá reintentando.");
+  }
 
   // ── Servidor web ──────────────────────────────────────────────
   // server.on() asocia una URL con su función manejadora (handler).
@@ -638,15 +687,6 @@ void setup() {
   server.begin();
   Serial.println("[WEB] Servidor iniciado en puerto 80");
 
-  // ── MQTT ──────────────────────────────────────────────────────
-  // Solo configuramos MQTT si el usuario definió un servidor en config.h.
-  // Si MQTT_SERVER es "" → toda la lógica MQTT se omite silenciosamente.
-  if (strlen(MQTT_SERVER) > 0) {
-    mqtt.setServer(MQTT_SERVER, MQTT_PORT);   // IP y puerto del broker
-    mqtt.setCallback(mqttCallback);           // Función que recibirá los mensajes entrantes
-    reconnectMQTT();                          // Primer intento de conexión
-  }
-
   // ── Primera lectura del sensor ────────────────────────────────
   // Hacemos una lectura inicial para que el servidor web tenga datos
   // reales desde el primer momento (en lugar de mostrar 0%).
@@ -654,6 +694,28 @@ void setup() {
   lastPercent  = rawToPercent(lastRaw);
   lastSampleMs = millis();  // Registrar el instante de esta primera lectura
   Serial.printf("[ADC] Raw: %d | Humedad: %.1f%%\n", lastRaw, lastPercent);
+
+  // ── MQTT ──────────────────────────────────────────────────────
+  // Solo configuramos MQTT si el usuario definió un servidor en config.h.
+  // Si MQTT_SERVER es "" → toda la lógica MQTT se omite silenciosamente.
+  if (strlen(MQTT_SERVER) > 0) {
+    // Reservar espacio para "-<chipid-6hex>" + '\0' (8 chars) y usar el resto
+    // para el prefijo configurable del clientId.
+    const int prefixMaxLen = (int)sizeof(mqttClientIdDynamic) - 8;
+    snprintf(
+      mqttClientIdDynamic,
+      sizeof(mqttClientIdDynamic),
+      "%.*s-%06X",
+      prefixMaxLen,
+      MQTT_CLIENT_ID,
+      ESP.getChipId()
+    );
+    Serial.printf("[MQTT] ClientId dinámico: %s\n", mqttClientIdDynamic);
+
+    mqtt.setServer(MQTT_SERVER, MQTT_PORT);   // IP y puerto del broker
+    mqtt.setCallback(mqttCallback);           // Función que recibirá los mensajes entrantes
+    reconnectMQTT();                          // Primer intento de conexión
+  }
 }
 
 // ================================================================
@@ -684,13 +746,17 @@ void loop() {
 
   // ── 2. MQTT: mantener conexión y procesar mensajes entrantes ──
   if (strlen(MQTT_SERVER) > 0) {
+    ensureWiFiConnected();
+
     unsigned long now = millis();
 
     // Si la conexión se perdió, intentar reconectar cada 5 segundos.
     // Usamos el patrón "non-blocking retry" con timestamp:
     //   - Guardamos cuándo fue el último intento (lastMqttAttemptMs)
     //   - Solo reintentamos si pasaron >= MQTT_RECONNECT_INTERVAL_MS ms
-    if (!mqtt.connected() && (now - lastMqttAttemptMs >= MQTT_RECONNECT_INTERVAL_MS)) {
+    if (WiFi.status() == WL_CONNECTED &&
+        !mqtt.connected() &&
+        (now - lastMqttAttemptMs >= MQTT_RECONNECT_INTERVAL_MS)) {
       lastMqttAttemptMs = now;
       reconnectMQTT();
     }
@@ -698,7 +764,9 @@ void loop() {
     // mqtt.loop() es OBLIGATORIO en cada iteración cuando se usa PubSubClient.
     // Procesa los mensajes entrantes (llama a mqttCallback si llegó algo)
     // y envía los keepalive MQTT para que el broker no cierre la conexión.
-    mqtt.loop();
+    if (WiFi.status() == WL_CONNECTED && mqtt.connected()) {
+      mqtt.loop();
+    }
   }
 
   // ── 3. Lectura periódica del sensor y publicación MQTT ────────

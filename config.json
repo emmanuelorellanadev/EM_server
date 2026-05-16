@@ -8,7 +8,8 @@
       "esp8266": "sensors/esp8266",
       "raspberrypi": "sensors/raspberrypi",
       "all": "sensors/#",
-      "cmd_esp8266": "commands/esp8266"
+      "cmd_esp8266": "commands/esp8266",
+      "device_status": "devices/+/status"
     },
     "client_id_subscriber": "em_server_subscriber",
     "client_id_sensehat": "em_server_sensehat"

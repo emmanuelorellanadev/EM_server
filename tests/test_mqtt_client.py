@@ -6,6 +6,8 @@ import time
 import database
 from mqtt_client import _on_message
 
+TIMESTAMP_TOLERANCE_SEC = 2
+
 
 class _FakeMsg:
     """Minimal stand-in for a paho MQTT message."""
@@ -94,6 +96,17 @@ def test_last_watered_sec_is_converted_to_absolute_timestamp(db_path):
     rows = database.get_readings_history(db_path, source="esp8266")
     by_field = {r["field"]: r for r in rows}
     assert "last_watering_at_epoch" in by_field
-    expected_min = before - 120 - 2
-    expected_max = after - 120 + 2
+    expected_min = before - 120 - TIMESTAMP_TOLERANCE_SEC
+    expected_max = after - 120 + TIMESTAMP_TOLERANCE_SEC
     assert expected_min <= by_field["last_watering_at_epoch"]["value"] <= expected_max
+
+
+def test_last_watered_sec_minus_one_stores_sentinel(db_path):
+    import json
+    userdata = _make_userdata(db_path, {})
+    payload = json.dumps({"watering": False, "last_watered_sec": -1}).encode()
+    _on_message(None, userdata, _FakeMsg("sensors/esp8266", payload))
+
+    rows = database.get_readings_history(db_path, source="esp8266")
+    by_field = {r["field"]: r for r in rows}
+    assert by_field["last_watering_at_epoch"]["value"] == -1.0

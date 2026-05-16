@@ -30,11 +30,11 @@ function fieldIcon(field) {
 }
 
 function formatLastWatering(epochSeconds) {
-  if (!Number.isFinite(epochSeconds) || epochSeconds <= 0) {
+  if (!Number.isFinite(epochSeconds) || epochSeconds < 0) {
     return 'Último riego: sin registro';
   }
   const dt = new Date(epochSeconds * 1000);
-  return `Último riego: ${dt.toLocaleString('es-GT', { hour12: false })}`;
+  return `Último riego: ${dt.toLocaleString('es-GT', { hour12: false, timeZone: 'America/Guatemala' })}`;
 }
 
 // ------------------------------------------------------------------ //
@@ -118,7 +118,7 @@ function updateCards(data) {
           valEl.innerHTML = `${parseFloat(r.value).toFixed(1)} <small>${r.unit}</small>`;
         }
       }
-      if (timeEl && r.field !== LAST_WATERING_FIELD) timeEl.textContent = r.recorded_at;
+      if (timeEl) timeEl.textContent = r.recorded_at;
       if (r.field === 'watering') {
         const extraEl = card.querySelector('.last-watering-time');
         if (extraEl) extraEl.textContent = formatLastWatering(lastWateringBySource[r.source]);

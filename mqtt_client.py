@@ -15,8 +15,6 @@ import os
 import signal
 import sys
 import time
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
 import paho.mqtt.client as mqtt
 
@@ -29,7 +27,6 @@ logging.basicConfig(
 logger = logging.getLogger("mqtt_client")
 
 _running = True
-_TZ_GUATEMALA = ZoneInfo("America/Guatemala")
 
 
 def _load_config(path: str) -> dict:
@@ -93,9 +90,13 @@ def _on_message(client, userdata, msg):
 
     logger.debug("Message from %s: %s", source, payload)
     last_watered_sec = payload.get("last_watered_sec")
-    if isinstance(last_watered_sec, (int, float)) and last_watered_sec >= 0:
-        now_ts = datetime.now(_TZ_GUATEMALA).timestamp()
-        last_watering_at_epoch = now_ts - float(last_watered_sec)
+    if isinstance(last_watered_sec, (int, float)):
+        if last_watered_sec >= 0:
+            now_ts = time.time()
+            last_watering_at_epoch = now_ts - float(last_watered_sec)
+        else:
+            # Sentinel used by ESP8266 when no irrigation has happened yet.
+            last_watering_at_epoch = -1.0
         insert_reading(
             db_path,
             source,

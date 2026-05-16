@@ -159,8 +159,8 @@ def test_index_hides_internal_last_watering_fields(client):
     database.insert_reading(db, "esp8266", "last_watered_sec", 20.0)
     resp = c.get("/")
     assert resp.status_code == 200
-    assert b"last_watering_at_epoch" not in resp.data
-    assert b"last_watered_sec" not in resp.data
+    assert b"Last Watering At Epoch" not in resp.data
+    assert b"Last Watered Sec" not in resp.data
 
 
 # ---------------------------------------------------------------------------

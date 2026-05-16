@@ -62,3 +62,21 @@ def test_invalid_json_payload_is_ignored(db_path):
     userdata = _make_userdata(db_path, {})
     _on_message(None, userdata, _FakeMsg("sensors/esp8266", b"not-json"))
     assert database.get_readings_history(db_path) == []
+
+
+def test_device_status_online_is_stored_as_boolean(db_path):
+    userdata = _make_userdata(db_path, {})
+    _on_message(None, userdata, _FakeMsg("devices/esp8266/status", b"online"))
+    rows = database.get_readings_history(db_path, source="esp8266")
+    assert len(rows) == 1
+    assert rows[0]["field"] == "online"
+    assert rows[0]["value"] == 1.0
+
+
+def test_device_status_offline_is_stored_as_boolean(db_path):
+    userdata = _make_userdata(db_path, {})
+    _on_message(None, userdata, _FakeMsg("devices/esp8266/status", b"offline"))
+    rows = database.get_readings_history(db_path, source="esp8266")
+    assert len(rows) == 1
+    assert rows[0]["field"] == "online"
+    assert rows[0]["value"] == 0.0

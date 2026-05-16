@@ -42,6 +42,7 @@ _FIELD_ICONS = {
     "temperature":          "🌡️",
     "humidity":             "💧",
     "soil_humidity":        "🌱",
+    "online":               "📡",
     "light":                "☀️",
     "pressure":             "🌀",
     "watering":             "🚿",
@@ -52,6 +53,7 @@ _FIELD_LABELS = {
     "temperature":          "Temperatura",
     "humidity":             "Humedad Ambiental",
     "soil_humidity":        "Humedad de Suelo",
+    "online":               "Conectado MQTT",
     "light":                "Iluminación",
     "pressure":             "Presión Atmosférica",
     "watering":             "Riego Activo",
@@ -60,7 +62,7 @@ _FIELD_LABELS = {
 }
 
 # Fields that represent boolean on/off state (stored as 1.0 / 0.0)
-BOOLEAN_FIELDS = {"watering"}
+BOOLEAN_FIELDS = {"watering", "online"}
 
 
 @app.template_global()

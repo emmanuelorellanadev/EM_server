@@ -37,27 +37,50 @@ def _load_config(path: str) -> dict:
 def _on_connect(client, userdata, flags, rc):
     if rc == 0:
         logger.info("Connected to MQTT broker")
-        topic = userdata["config"]["mqtt"]["topics"]["all"]
-        client.subscribe(topic)
-        logger.info("Subscribed to topic: %s", topic)
+        topics_cfg = userdata["config"]["mqtt"]["topics"]
+        sensor_topic = topics_cfg["all"]
+        status_topic = topics_cfg.get("device_status", "devices/+/status")
+        client.subscribe(sensor_topic)
+        client.subscribe(status_topic)
+        logger.info("Subscribed to topic: %s", sensor_topic)
+        logger.info("Subscribed to topic: %s", status_topic)
     else:
         logger.error("Failed to connect, return code %d", rc)
+
+
+def _is_device_status_topic(topic: str) -> bool:
+    parts = topic.split("/")
+    return len(parts) == 3 and parts[0] == "devices" and parts[2] == "status"
 
 
 def _on_message(client, userdata, msg):
     db_path = userdata["db_path"]
     topic = msg.topic
-    try:
-        payload = json.loads(msg.payload.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        logger.warning("Could not decode payload on %s: %s", topic, exc)
-        return
+    if _is_device_status_topic(topic):
+        try:
+            status = msg.payload.decode("utf-8").strip().lower()
+        except UnicodeDecodeError as exc:
+            logger.warning("Could not decode status payload on %s: %s", topic, exc)
+            return
 
-    # Derive a human-readable source name from the topic path.
-    # e.g. "sensors/esp8266" -> "esp8266"
-    #      "sensors/raspberrypi" -> "raspberrypi"
-    parts = topic.split("/")
-    source = parts[-1] if len(parts) >= 2 else topic
+        if status not in {"online", "offline"}:
+            logger.warning("Ignoring unsupported status payload on %s: %r", topic, status)
+            return
+
+        source = topic.split("/")[1]
+        payload = {"online": status == "online"}
+    else:
+        try:
+            payload = json.loads(msg.payload.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            logger.warning("Could not decode payload on %s: %s", topic, exc)
+            return
+
+        # Derive a human-readable source name from the topic path.
+        # e.g. "sensors/esp8266" -> "esp8266"
+        #      "sensors/raspberrypi" -> "raspberrypi"
+        parts = topic.split("/")
+        source = parts[-1] if len(parts) >= 2 else topic
 
     # Apply per-source field name mappings defined in config.json.
     # Example mapping: esp8266 "percent" -> "soil_humidity"

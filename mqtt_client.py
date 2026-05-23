@@ -89,6 +89,9 @@ def _on_message(client, userdata, msg):
         payload = {mappings.get(k, k): v for k, v in payload.items()}
 
     logger.debug("Message from %s: %s", source, payload)
+    # The ESP8266 publishes "seconds since last irrigation" as relative time.
+    # Here we normalize it to an absolute UNIX timestamp for dashboard display.
+    # A value of -1 means "no irrigation yet", and is persisted as sentinel -1.
     last_watered_sec = payload.get("last_watered_sec")
     if isinstance(last_watered_sec, (int, float)):
         if last_watered_sec >= 0:

@@ -19,6 +19,7 @@ const FIELD_META = {
 
 // Fields rendered as on/off rather than a number
 const BOOLEAN_FIELDS = new Set(['watering', 'online']);
+// Canonical field that stores last irrigation as UNIX epoch seconds.
 const LAST_WATERING_FIELD = 'last_watering_at_epoch';
 
 function fieldLabel(field) {
@@ -92,6 +93,8 @@ function initTrendChart(latestData) {
 // Live card update (called after /api/latest refresh)
 // ------------------------------------------------------------------ //
 function updateCards(data) {
+  // Build source -> last irrigation timestamp map first, because this value
+  // is shown inside the "watering" card but arrives as a separate field.
   const lastWateringBySource = {};
   data.forEach(r => {
     if (r.field === LAST_WATERING_FIELD) {

@@ -63,6 +63,7 @@ _FIELD_LABELS = {
 
 # Fields that represent boolean on/off state (stored as 1.0 / 0.0)
 BOOLEAN_FIELDS = {"watering", "online"}
+# Internal telemetry fields used to enrich UI state (not rendered as cards).
 HIDDEN_FIELDS = {"last_watered_sec", "last_watering_at_epoch"}
 
 

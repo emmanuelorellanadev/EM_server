@@ -89,21 +89,46 @@ def _on_message(client, userdata, msg):
         payload = {mappings.get(k, k): v for k, v in payload.items()}
 
     logger.debug("Message from %s: %s", source, payload)
-    last_watered_sec = payload.get("last_watered_sec")
-    if isinstance(last_watered_sec, (int, float)):
+    if source == "esp8266" and "last_watered_sec" not in payload:
+        logger.warning(
+            "ESP8266 payload sin 'last_watered_sec'. keys=%s payload=%s",
+            sorted(payload.keys()),
+            payload,
+        )
+
+    raw_last_watered_sec = payload.get("last_watered_sec")
+    last_watered_sec = None
+    if isinstance(raw_last_watered_sec, (int, float)):
+        last_watered_sec = float(raw_last_watered_sec)
+    elif isinstance(raw_last_watered_sec, str):
+        try:
+            last_watered_sec = float(raw_last_watered_sec.strip())
+        except ValueError:
+            logger.warning(
+                "Invalid 'last_watered_sec' from %s: %r",
+                source,
+                raw_last_watered_sec,
+            )
+
+    if last_watered_sec is not None:
         if last_watered_sec >= 0:
             now_ts = time.time()
-            last_watering_at_epoch = now_ts - float(last_watered_sec)
+            last_watering_at_epoch = now_ts - last_watered_sec
+            insert_reading(
+                db_path,
+                source,
+                "last_watering_at_epoch",
+                last_watering_at_epoch,
+                "unix_s",
+            )
         else:
-            # Sentinel used by ESP8266 when no irrigation has happened yet.
-            last_watering_at_epoch = -1.0
-        insert_reading(
-            db_path,
-            source,
-            "last_watering_at_epoch",
-            last_watering_at_epoch,
-            "unix_s",
-        )
+            # ESP8266 sends -1 after boot when it has no in-memory irrigation
+            # history yet. We keep the last known timestamp already stored.
+            logger.info(
+                "Ignoring sentinel last_watered_sec=-1 from %s; "
+                "preserving previous last_watering_at_epoch",
+                source,
+            )
     insert_readings_from_payload(db_path, source, payload)
     logger.info("Stored reading from source '%s'", source)
 

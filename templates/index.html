@@ -21,31 +21,80 @@
     <div id="cards-container">
       {% for src in sources %}
         <div class="source-panel {% if loop.first %}active{% endif %}" id="panel-{{ src }}">
+          {% set source_fields = latest_by_source.get(src, {}) %}
           <div class="cards-grid">
-            {% for reading in latest if reading.source == src and should_render_field(reading.field) %}
-              <div class="card {{ reading.field }}">
-                <div class="card-icon">{{ field_icon(reading.field) }}</div>
-                <div class="card-body">
-                  <span class="card-label">{{ field_label(reading.field) }}</span>
-                  {% if is_boolean_field(reading.field) %}
-                    <span class="card-value status-badge {% if reading.value %}status-on{% else %}status-off{% endif %}">
-                      {% if reading.value %}Activo{% else %}Inactivo{% endif %}
-                    </span>
-                  {% else %}
-                    <span class="card-value">
-                      {{ "%.1f"|format(reading.value) }}
-                      <small>{{ reading.unit }}</small>
-                    </span>
-                  {% endif %}
-                  <span class="card-time">{{ reading.recorded_at }}</span>
-                  {% if reading.field == "watering" %}
-                    <span class="card-extra last-watering-time" data-source="{{ src }}"></span>
-                  {% endif %}
-                </div>
-              </div>
+            {% if src == 'esp8266' %}
+              {#
+                ESP8266 usa un layout intencional para evitar duplicados:
+                1) Humedad de suelo
+                2) Riego Activo (estado + metadatos de riego)
+                3) Conectado MQTT
+              #}
+              {% set esp_order = ['soil_humidity', 'watering', 'online'] %}
+              {% for field in esp_order %}
+                {% set reading = source_fields.get(field) %}
+                {% if reading %}
+                  <div class="card {{ reading.field }}">
+                    <div class="card-icon">{{ field_icon(reading.field) }}</div>
+                    <div class="card-body">
+                      <span class="card-label">{{ field_label(reading.field) }}</span>
+                      {% if is_boolean_field(reading.field) %}
+                        <span class="card-value status-badge {% if reading.value %}status-on{% else %}status-off{% endif %}">
+                          {% if reading.value %}Activo{% else %}Inactivo{% endif %}
+                        </span>
+                      {% else %}
+                        <span class="card-value">
+                          {{ "%.1f"|format(reading.value) }}
+                          <small>{{ reading.unit }}</small>
+                        </span>
+                      {% endif %}
+                      <span class="card-time">{{ reading.recorded_at }}</span>
+
+                      {% if reading.field == 'watering' %}
+                        <span class="card-extra watering-duration" data-source="{{ src }}">
+                          {{ relay_duration_by_source.get(src, "Duracion de riego: sin dato") }}
+                        </span>
+                        <span class="card-extra watering-threshold" data-source="{{ src }}">
+                          {{ threshold_by_source.get(src, "Umbral de activacion: sin dato") }}
+                        </span>
+                        <span
+                          class="card-extra last-watering-time"
+                          data-source="{{ src }}"
+                          data-last-watering-epoch="{{ ('%.6f'|format(last_watering_epoch_by_source[src])) if src in last_watering_epoch_by_source else '' }}"
+                        >
+                          {{ last_watering_by_source.get(src, "Ultimo riego: sin registro") }}
+                        </span>
+                      {% endif %}
+                    </div>
+                  </div>
+                {% endif %}
+              {% endfor %}
+              {% if not source_fields.get('soil_humidity') and not source_fields.get('watering') and not source_fields.get('online') %}
+                <p class="no-data">Sin datos aún para {{ src }}.</p>
+              {% endif %}
             {% else %}
-              <p class="no-data">Sin datos aún para {{ src }}.</p>
-            {% endfor %}
+              {% for reading in latest if reading.source == src and should_render_field(reading.field) %}
+                <div class="card {{ reading.field }}">
+                  <div class="card-icon">{{ field_icon(reading.field) }}</div>
+                  <div class="card-body">
+                    <span class="card-label">{{ field_label(reading.field) }}</span>
+                    {% if is_boolean_field(reading.field) %}
+                      <span class="card-value status-badge {% if reading.value %}status-on{% else %}status-off{% endif %}">
+                        {% if reading.value %}Activo{% else %}Inactivo{% endif %}
+                      </span>
+                    {% else %}
+                      <span class="card-value">
+                        {{ "%.1f"|format(reading.value) }}
+                        <small>{{ reading.unit }}</small>
+                      </span>
+                    {% endif %}
+                    <span class="card-time">{{ reading.recorded_at }}</span>
+                  </div>
+                </div>
+              {% else %}
+                <p class="no-data">Sin datos aún para {{ src }}.</p>
+              {% endfor %}
+            {% endif %}
           </div>
 
           {# Botón de riego manual — solo visible para el panel del ESP8266 #}
@@ -75,7 +124,17 @@
 
 <section class="chart-section">
   <div class="section-header">
-    <h2>Tendencias – Humedad de Suelo y Umbral de Activación (últimas 50 lecturas)</h2>
+    <h2>Tendencia de Riego (ESP8266)</h2>
+    <div class="trend-controls">
+      <label for="trend-range">Rango:</label>
+      <select id="trend-range" onchange="onTrendRangeChange()">
+        <option value="1h">Ultima hora</option>
+        <option value="1d">Ultimo dia</option>
+        <option value="1w">Ultima semana</option>
+        <option value="1m">Ultimo mes</option>
+        <option value="1y">Ultimo anio</option>
+      </select>
+    </div>
   </div>
   <canvas id="trend-chart" height="100"></canvas>
 </section>
@@ -83,10 +142,9 @@
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
 <script>
-  const latestData = {{ latest | tojson }};
-  updateCards(latestData);
-  loadTrendChart();
+  loadTrendChart(getSelectedTrendRange());
 
   function showSource(src, event) {
     document.querySelectorAll('.source-panel').forEach(p => p.classList.remove('active'));
@@ -101,6 +159,7 @@
     const resp = await fetch('/api/latest');
     const data = await resp.json();
     updateCards(data);
+    await loadTrendChart(getSelectedTrendRange());
     btn.textContent = '↺ Actualizar';
   }
 </script>

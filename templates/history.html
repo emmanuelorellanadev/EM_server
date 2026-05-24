@@ -48,9 +48,13 @@
             <tr>
               <td>{{ r.recorded_at }}</td>
               <td><span class="badge">{{ r.source }}</span></td>
-              <td>{{ r.field }}</td>
-              <td class="num">{{ "%.2f"|format(r.value) }}</td>
-              <td>{{ r.unit }}</td>
+              <td>{{ r.display_field if r.display_field is defined else r.field }}</td>
+              {% if r.display_is_numeric is defined and not r.display_is_numeric %}
+                <td>{{ r.display_value }}</td>
+              {% else %}
+                <td class="num">{{ "%.2f"|format(r.value) }}</td>
+              {% endif %}
+              <td>{{ r.display_unit if r.display_unit is defined else r.unit }}</td>
             </tr>
           {% endfor %}
         </tbody>

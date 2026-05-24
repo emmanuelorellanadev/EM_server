@@ -128,6 +128,11 @@ main {
 .card-time { font-size: .7rem; color: var(--muted); }
 .card-extra { font-size: .75rem; color: var(--muted); }
 
+/* Metadatos de la tarjeta compuesta "Riego Activo" */
+.watering .card-extra {
+  line-height: 1.35;
+}
+
 /* ---- Sensor colour accents ---------------------------------------- */
 .temperature .card-icon { color: #e53935; }
 .humidity    .card-icon { color: #1e88e5; }
@@ -199,6 +204,25 @@ main {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 1.2rem;
+}
+
+.trend-controls {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+.trend-controls label {
+  font-size: .85rem;
+  color: var(--muted);
+}
+
+.trend-controls select {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: .35rem .7rem;
+  font-size: .9rem;
+  background: #fff;
 }
 
 /* ---- Empty state --------------------------------------------------- */
@@ -287,4 +311,5 @@ footer {
 @media (max-width: 600px) {
   header { padding: .8rem 1rem; }
   .filter-form { flex-direction: column; align-items: flex-start; }
+  .trend-controls { width: 100%; justify-content: flex-start; }
 }

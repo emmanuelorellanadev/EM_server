@@ -152,6 +152,64 @@ def get_readings_history(
     return [dict(r) for r in rows]
 
 
+def get_field_history(
+    db_path: str,
+    source: str,
+    field: str,
+    since: datetime | None = None,
+    limit: int | None = None,
+) -> list[dict]:
+    """Return time-ordered history for one source/field pair.
+
+    This helper is intentionally small and explicit so API endpoints can build
+    custom trend payloads without duplicating SQL everywhere.
+
+    Args:
+        db_path: SQLite database path.
+        source: Sensor source (for example: "esp8266").
+        field:  Field name (for example: "soil_humidity").
+        since:  Optional lower bound (inclusive) for ``recorded_at``.
+        limit:  Optional cap of *most recent* rows to return.
+
+    Returns:
+        A list of dict rows sorted oldest -> newest.
+    """
+    conditions = ["source = ?", "field = ?"]
+    params: list = [source, field]
+
+    if since is not None:
+        conditions.append("recorded_at >= ?")
+        # Keep the same fixed UTC-6 offset format used by insert_reading().
+        params.append(since.strftime("%Y-%m-%dT%H:%M:%S-06:00"))
+
+    where = " AND ".join(conditions)
+
+    if limit is not None:
+        # Fetch most recent rows efficiently, then reverse so callers always
+        # receive chronological data for plotting.
+        sql = f"""
+            SELECT source, field, value, unit, recorded_at
+            FROM readings
+            WHERE {where}
+            ORDER BY recorded_at DESC
+            LIMIT ?
+        """
+        params_with_limit = [*params, limit]
+        with get_connection(db_path) as conn:
+            rows = conn.execute(sql, params_with_limit).fetchall()
+        return [dict(r) for r in reversed(rows)]
+
+    sql = f"""
+        SELECT source, field, value, unit, recorded_at
+        FROM readings
+        WHERE {where}
+        ORDER BY recorded_at ASC
+    """
+    with get_connection(db_path) as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_sources(db_path: str) -> list[str]:
     """Return all distinct sensor sources seen so far."""
     with get_connection(db_path) as conn:
@@ -159,3 +217,60 @@ def get_sources(db_path: str) -> list[str]:
             "SELECT DISTINCT source FROM readings ORDER BY source"
         ).fetchall()
     return [r["source"] for r in rows]
+
+
+def get_last_valid_last_watering_epoch(db_path: str, source: str) -> float | None:
+    """Return the latest valid "ultimo riego" epoch for one source.
+
+    Why this helper exists:
+    - Some ESP8266 payloads publish ``last_watered_sec = -1`` after reboot.
+    - In those cases, UI should keep the last known valid watering timestamp.
+
+    Lookup strategy (most reliable first):
+    1) last positive value from ``last_watering_at_epoch``.
+    2) fallback from latest non-negative ``last_watered_sec`` + ``recorded_at``.
+    """
+    with get_connection(db_path) as conn:
+        row_epoch = conn.execute(
+            """
+            SELECT value
+            FROM readings
+            WHERE source = ?
+              AND field = 'last_watering_at_epoch'
+              AND value > 0
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (source,),
+        ).fetchone()
+
+        if row_epoch is not None:
+            try:
+                return float(row_epoch["value"])
+            except (TypeError, ValueError):
+                return None
+
+        row_sec = conn.execute(
+            """
+            SELECT value, recorded_at
+            FROM readings
+            WHERE source = ?
+              AND field = 'last_watered_sec'
+              AND value >= 0
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (source,),
+        ).fetchone()
+
+    if row_sec is None:
+        return None
+
+    try:
+        sec = float(row_sec["value"])
+        dt = datetime.fromisoformat(str(row_sec["recorded_at"]))
+    except (TypeError, ValueError):
+        return None
+
+    epoch = dt.timestamp() - sec
+    return epoch if epoch > 0 else None

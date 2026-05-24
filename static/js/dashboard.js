@@ -20,6 +20,9 @@ const FIELD_META = {
 // Fields rendered as on/off rather than a number
 const BOOLEAN_FIELDS = new Set(['watering', 'online']);
 const LAST_WATERING_FIELD = 'last_watering_at_epoch';
+const LAST_WATERED_SEC_FIELD = 'last_watered_sec';
+const RELAY_ON_TIME_FIELD = 'relay_on_time_s';
+const ON_THRESHOLD_FIELD = 'on_threshold_percent';
 
 function fieldLabel(field) {
   return (FIELD_META[field] || {}).label || field;
@@ -29,12 +32,59 @@ function fieldIcon(field) {
   return (FIELD_META[field] || {}).icon || '📊';
 }
 
+/**
+ * Formats "ultimo riego" from unix epoch seconds.
+ */
 function formatLastWatering(epochSeconds) {
-  if (!Number.isFinite(epochSeconds) || epochSeconds < 0) {
-    return 'Último riego: sin registro';
+  if (!Number.isFinite(epochSeconds) || epochSeconds <= 0) {
+    return 'Ultimo riego: sin registro';
   }
   const dt = new Date(epochSeconds * 1000);
-  return `Último riego: ${dt.toLocaleString('es-GT', { hour12: false, timeZone: 'America/Guatemala' })}`;
+  return `Ultimo riego: ${dt.toLocaleString('es-GT', { hour12: false, timeZone: 'America/Guatemala' })}`;
+}
+
+/**
+ * Reads persisted epoch from a card (server-rendered bootstrap value).
+ */
+function readPersistedEpoch(card) {
+  const node = card.querySelector('.last-watering-time');
+  if (!node) return Number.NaN;
+  const raw = node.getAttribute('data-last-watering-epoch');
+  const epoch = Number(raw);
+  if (Number.isFinite(epoch) && epoch > 0) return epoch;
+  return Number.NaN;
+}
+
+/**
+ * Converts API recorded_at ISO string to epoch seconds.
+ */
+function recordedAtToEpochSeconds(recordedAt) {
+  if (!recordedAt) return Number.NaN;
+  const ms = Date.parse(recordedAt);
+  if (!Number.isFinite(ms)) return Number.NaN;
+  return ms / 1000;
+}
+
+function formatRelayDuration(secondsValue) {
+  const seconds = Number(secondsValue);
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return 'Duracion de riego: sin dato';
+  }
+  if (Number.isInteger(seconds)) {
+    return `Duracion de riego: ${seconds} s`;
+  }
+  return `Duracion de riego: ${seconds.toFixed(1)} s`;
+}
+
+function formatThreshold(value) {
+  const threshold = Number(value);
+  if (!Number.isFinite(threshold) || threshold < 0) {
+    return 'Umbral de activacion: sin dato';
+  }
+  if (Number.isInteger(threshold)) {
+    return `Umbral de activacion: ${threshold} %`;
+  }
+  return `Umbral de activacion: ${threshold.toFixed(1)} %`;
 }
 
 // ------------------------------------------------------------------ //
@@ -42,23 +92,47 @@ function formatLastWatering(epochSeconds) {
 // ------------------------------------------------------------------ //
 let trendChart = null;
 
-function initTrendChart(latestData) {
+/**
+ * Builds (or rebuilds) the irrigation trend chart.
+ *
+ * @param {object} trendPayload Response from GET /api/trend.
+ */
+function initTrendChart(trendPayload) {
   const canvas = document.getElementById('trend-chart');
-  if (!canvas || !latestData || latestData.length === 0) return;
+  if (!canvas || !trendPayload || !trendPayload.datasets) return;
 
-  // Group by field for the legend
-  const fields = [...new Set(latestData.map(r => r.field))];
-  const palette = ['#4caf50', '#1e88e5', '#ff8f00', '#e53935', '#6a1b9a', '#6d4c41'];
+  // Always destroy previous chart before creating a new one.
+  // This avoids memory leaks and duplicated canvases.
+  if (trendChart) {
+    trendChart.destroy();
+    trendChart = null;
+  }
+
+  const datasetsByField = trendPayload.datasets;
+  const fields = Object.keys(datasetsByField);
+  const colors = {
+    soil_humidity: '#2e7d32',
+    on_threshold_percent: '#d32f2f',
+  };
+
+  const formatDate = value => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return new Intl.DateTimeFormat('es-GT', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    }).format(date);
+  };
 
   const datasets = fields.map((field, i) => ({
     label: fieldLabel(field),
-    data: latestData
-      .filter(r => r.field === field)
-      .map(r => ({ x: r.recorded_at, y: r.value })),
-    borderColor: palette[i % palette.length],
-    backgroundColor: palette[i % palette.length] + '22',
+    data: datasetsByField[field] || [],
+    borderColor: colors[field] || ['#4caf50', '#1e88e5', '#ff8f00'][i % 3],
+    backgroundColor: (colors[field] || '#4caf50') + '22',
     tension: 0.3,
-    pointRadius: 3,
+    pointRadius: 2,
+    borderWidth: field === 'on_threshold_percent' ? 2 : 3,
+    borderDash: field === 'on_threshold_percent' ? [8, 6] : [],
     fill: false,
   }));
 
@@ -71,17 +145,21 @@ function initTrendChart(latestData) {
       plugins: {
         legend: { position: 'top' },
         tooltip: { callbacks: {
-          label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}`,
+          title: items => (items.length > 0 ? formatDate(items[0].parsed.x) : ''),
+          label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} %`,
         }},
       },
       scales: {
         x: {
-          type: 'category',
-          title: { display: true, text: 'Timestamp (UTC)' },
+          type: 'time',
+          time: { tooltipFormat: 'dd/MM/yyyy HH:mm' },
+          title: { display: true, text: 'Fecha y hora (America/Guatemala)' },
           ticks: { maxRotation: 30, maxTicksLimit: 10 },
         },
         y: {
-          title: { display: true, text: 'Valor' },
+          min: 0,
+          max: 100,
+          title: { display: true, text: 'Humedad (%)' },
         },
       },
     },
@@ -92,11 +170,10 @@ function initTrendChart(latestData) {
 // Live card update (called after /api/latest refresh)
 // ------------------------------------------------------------------ //
 function updateCards(data) {
-  const lastWateringBySource = {};
+  const bySource = {};
   data.forEach(r => {
-    if (r.field === LAST_WATERING_FIELD) {
-      lastWateringBySource[r.source] = Number(r.value);
-    }
+    if (!bySource[r.source]) bySource[r.source] = {};
+    bySource[r.source][r.field] = r;
   });
 
   // Re-render only the value + time inside each existing card
@@ -119,9 +196,47 @@ function updateCards(data) {
         }
       }
       if (timeEl) timeEl.textContent = r.recorded_at;
+
+      // En la tarjeta compuesta de "Riego Activo" actualizamos metadatos
+      // relacionados para mantener una sola fuente visual de verdad.
       if (r.field === 'watering') {
+        const sourceSnapshot = bySource[r.source] || {};
+
+        const durationEl = card.querySelector('.watering-duration');
+        if (durationEl) {
+          durationEl.textContent = formatRelayDuration(sourceSnapshot[RELAY_ON_TIME_FIELD]?.value);
+        }
+
+        const thresholdEl = card.querySelector('.watering-threshold');
+        if (thresholdEl) {
+          thresholdEl.textContent = formatThreshold(sourceSnapshot[ON_THRESHOLD_FIELD]?.value);
+        }
+
+        let lastEpoch = Number(sourceSnapshot[LAST_WATERING_FIELD]?.value);
+        if (!Number.isFinite(lastEpoch) || lastEpoch <= 0) {
+          const secValue = Number(sourceSnapshot[LAST_WATERED_SEC_FIELD]?.value);
+          if (Number.isFinite(secValue) && secValue >= 0) {
+            const secRecordedAt = sourceSnapshot[LAST_WATERED_SEC_FIELD]?.recorded_at;
+            const recEpoch = recordedAtToEpochSeconds(secRecordedAt);
+            if (Number.isFinite(recEpoch)) {
+              lastEpoch = recEpoch - secValue;
+            }
+          }
+        }
+
+        // Si no hay dato nuevo (ej. -1 tras reinicio del ESP), conservamos
+        // el ultimo valor valido ya renderizado en el DOM.
+        if (!Number.isFinite(lastEpoch) || lastEpoch <= 0) {
+          lastEpoch = readPersistedEpoch(card);
+        }
+
         const extraEl = card.querySelector('.last-watering-time');
-        if (extraEl) extraEl.textContent = formatLastWatering(lastWateringBySource[r.source]);
+        if (extraEl) {
+          extraEl.textContent = formatLastWatering(lastEpoch);
+          if (Number.isFinite(lastEpoch) && lastEpoch > 0) {
+            extraEl.setAttribute('data-last-watering-epoch', String(lastEpoch));
+          }
+        }
       }
     });
   });
@@ -186,35 +301,44 @@ async function sendWaterCommand(btn) {
 // Load trend chart from history API
 // ------------------------------------------------------------------ //
 
-// Only these two fields are shown in the trend chart.
-const CHART_FIELDS = ['soil_humidity', 'on_threshold_percent'];
+const TREND_SOURCE = 'esp8266';
+const TREND_RANGE_SELECT_ID = 'trend-range';
 
 /**
- * Fetches the last 50 readings for each chart field separately so that the
- * most-recent value per field always matches what is shown on the sensor
- * cards, then renders the trend chart.
+ * Reads the selected range from the selector.
+ * Falls back to "ultimos" when the selector is not present.
  */
-async function loadTrendChart() {
+function getSelectedTrendRange() {
+  const select = document.getElementById(TREND_RANGE_SELECT_ID);
+  if (!select) return '1h';
+  return select.value || '1h';
+}
+
+/**
+ * Loads trend data for the selected range and renders the chart.
+ *
+ * @param {string} rangeKey One of: 1h|1d|1w|1m|1y
+ */
+async function loadTrendChart(rangeKey = '1h') {
   try {
-    const responses = await Promise.all(
-      CHART_FIELDS.map(f => fetch(`/api/history?field=${f}&limit=50`))
-    );
-    const arrays = await Promise.all(
-      responses.map((r, i) => {
-        if (!r.ok) {
-          console.error(`loadTrendChart: API returned ${r.status} for ${CHART_FIELDS[i]}`);
-          return [];
-        }
-        return r.json();
-      })
-    );
-    const data = arrays.flat();
-    // Sort oldest-first so time flows left→right on the x-axis
-    data.sort((a, b) => a.recorded_at.localeCompare(b.recorded_at));
-    initTrendChart(data);
+    const url = `/api/trend?source=${encodeURIComponent(TREND_SOURCE)}&range=${encodeURIComponent(rangeKey)}`;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      console.error(`loadTrendChart: API returned ${resp.status}`);
+      return;
+    }
+    const payload = await resp.json();
+    initTrendChart(payload);
   } catch (err) {
     console.error('loadTrendChart: network error –', err);
   }
+}
+
+/**
+ * Handler for the range selector change event.
+ */
+function onTrendRangeChange() {
+  loadTrendChart(getSelectedTrendRange());
 }
 
 // ------------------------------------------------------------------ //
@@ -226,5 +350,6 @@ setInterval(async () => {
     if (!resp.ok) return;
     const data = await resp.json();
     updateCards(data);
+    await loadTrendChart(getSelectedTrendRange());
   } catch (_) { /* network error – ignore */ }
 }, 30000);

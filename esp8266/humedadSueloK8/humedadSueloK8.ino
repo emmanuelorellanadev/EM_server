@@ -410,13 +410,24 @@ void handleJson() {
 
   // Construir el JSON manualmente (sin librería externa para ahorrar RAM)
   String json = "{";
-  json += "\"percent\":"              + String(lastPercent, 1)                         + ",";
-  json += "\"watering\":"             + String(relayState == WATERING ? "true":"false") + ",";
-  json += "\"state\":\""              + estado                                         + "\",";
-  json += "\"last_watered_sec\":"     + String(secsAgo)                                + ",";
-  json += "\"on_threshold_percent\":" + String(ON_THRESHOLD_PERCENT)                   + ",";
-  json += "\"relay_on_time_s\":"      + String((float)RELAY_ON_TIME_MS / 1000.0f, 1);
+  json.reserve(196);
+  json += "\"percent\":";
+  json += String(lastPercent, 1);
+  json += ",\"watering\":";
+  json += (relayState == WATERING ? "true" : "false");
+  json += ",\"state\":\"";
+  json += estado;
+  json += "\",\"last_watered_sec\":";
+  json += String(secsAgo);
+  json += ",\"on_threshold_percent\":";
+  json += String(ON_THRESHOLD_PERCENT);
+  json += ",\"relay_on_time_s\":";
+  json += String((float)RELAY_ON_TIME_MS / 1000.0f, 1);
   json += "}";
+
+  if (json.indexOf("\"last_watered_sec\":") == -1) {
+    Serial.printf("[MQTT][WARN] JSON sin last_watered_sec: %s\n", json.c_str());
+  }
 
   // "application/json" es el Content-Type estándar para APIs REST
   server.send(200, "application/json", json);

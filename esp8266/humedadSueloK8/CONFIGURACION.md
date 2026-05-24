@@ -105,11 +105,12 @@ El firmware publica un JSON al broker cada `BACKGROUND_SAMPLE_MS`.
 **Formato del mensaje:**
 ```json
 {
-  "raw": 450,
   "percent": 51.2,
   "state": "WET",
   "watering": false,
-  "cooldown": false
+  "last_watered_sec": 120,
+  "on_threshold_percent": 35,
+  "relay_on_time_s": 1.0
 }
 ```
 

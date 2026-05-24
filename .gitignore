@@ -13,6 +13,8 @@ build/
 # Database files
 *.db
 *.sqlite3
+*.db-shm
+*.db-wal
 
 # Environment / secrets
 .env

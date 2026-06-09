@@ -225,6 +225,27 @@ main {
   background: #fff;
 }
 
+.hidden { display: none; }
+
+.charts-grid-rasp {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+.chart-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .9rem;
+}
+
+.chart-card h3 {
+  margin-bottom: .5rem;
+  color: var(--primary);
+  font-size: .95rem;
+}
+
 /* ---- Empty state --------------------------------------------------- */
 .empty-state {
   text-align: center;

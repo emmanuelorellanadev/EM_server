@@ -47,6 +47,20 @@ def test_field_mapping_renames_percent_to_soil_humidity(db_path):
     assert "raw" not in fields
 
 
+def test_field_mapping_applies_to_esp32_source(db_path):
+    """ESP32 source uses its own mapping and is stored under esp32_01."""
+    import json
+    payload = json.dumps({"percent": 55.7, "watering": True}).encode()
+    userdata = _make_userdata(db_path, {"esp32_01": {"percent": "soil_humidity"}})
+
+    _on_message(None, userdata, _FakeMsg("sensors/esp32_01", payload))
+
+    rows = database.get_readings_history(db_path, source="esp32_01")
+    fields = {r["field"] for r in rows}
+    assert "soil_humidity" in fields
+    assert "percent" not in fields
+
+
 def test_no_mapping_stores_original_field_name(db_path):
     """With no field_mappings configured, field names pass through unchanged."""
     import json

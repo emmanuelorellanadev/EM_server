@@ -16,22 +16,21 @@
 
   HARDWARE NECESARIO:
   ────────────────────
-    • ESP8266 NodeMCU V3
-        Seleccionar en Arduino IDE: "NodeMCU 1.0 (ESP-12E Module)"
-        Microcontrolador con Wi-Fi integrado. Tiene un único pin ADC (A0)
-        que lee voltajes entre 0 V y 1 V (internamente con divisor de voltaje
-        se puede leer hasta 3.3 V según la placa).
+    • ESP8266 NodeMCU V3 o ESP32 Dev Module
+        Seleccionar en Arduino IDE la placa real de tu hardware.
+        Este firmware comparte la misma lógica para ambas placas y usa
+        parámetros definidos en config.h (pines, MQTT, calibración, etc.).
 
     • Sensor capacitivo/resistivo K8 o C11
-        AO (Analog Output) → A0  : señal analógica de 0–1023 según humedad
-        DO (Digital Output) → D5 : salida digital (umbral fijo, no usado en control)
+        AO (Analog Output) → PIN_AO : señal analógica según humedad
+        DO (Digital Output) → PIN_DO : salida digital (umbral fijo, no usado en control)
         VCC → 3.3 V o 5 V según modelo
         GND → GND
 
     • Módulo relé 5 V
-        IN  → D1 (GPIO 5)  : señal de control desde el ESP8266
+        IN  → PIN_RELAY : señal de control desde la placa
         VCC → 5 V externo  : alimentación de la bobina del relé
-        GND → GND compartido con el ESP8266
+        GND → GND compartido con la placa
         Contactos NO/COM   : conectados a la electroválvula
         IMPORTANTE: Este módulo es active-HIGH (HIGH activa el relé).
 
@@ -48,7 +47,7 @@
        y datos del broker MQTT (IP de la Raspberry Pi).
     3. En Arduino IDE → Herramientas → Gestor de librerías:
          Instala "PubSubClient" de Nick O'Leary (v2.8 o superior).
-    4. Selecciona placa "NodeMCU 1.0 (ESP-12E Module)" y compila/sube.
+    4. Selecciona la placa (ESP8266 o ESP32), compila y sube.
 
   ENDPOINTS DEL SERVIDOR WEB LOCAL:
   ────────────────────────────────────
@@ -59,14 +58,14 @@
 
   COMUNICACIÓN MQTT (pub/sub):
   ──────────────────────────────
-    PUBLICACIÓN (ESP8266 → Raspberry Pi):
-      Tópico : sensors/esp8266
+    PUBLICACIÓN (Dispositivo → Raspberry Pi):
+      Tópico : definido por MQTT_TOPICO en config.h
       Cada   : BACKGROUND_SAMPLE_MS milisegundos
       Formato: {"percent":65.3,"state":"WET","watering":false,
                 "on_threshold_percent":35,"relay_on_time_s":1.0}
 
-    SUSCRIPCIÓN (Raspberry Pi → ESP8266):
-      Tópico  : commands/esp8266
+    SUSCRIPCIÓN (Raspberry Pi → Dispositivo):
+      Tópico  : definido por MQTT_TOPICO_CMD en config.h
       Comando : {"action":"water"}
       Efecto  : activa el riego remotamente (igual que si el sensor detectara suelo seco)
 
@@ -81,11 +80,20 @@
 // #include carga código externo necesario para el firmware.
 // Las librerías de sistema van entre < > y las propias entre " ".
 
+#if defined(ESP8266)
 #include <ESP8266WiFi.h>      // Maneja la conexión Wi-Fi del ESP8266.
+#include <ESP8266WebServer.h> // Servidor HTTP para ESP8266.
+using LocalWebServer = ESP8266WebServer;
+#elif defined(ESP32)
+#include <WiFi.h>             // Maneja la conexión Wi-Fi del ESP32.
+#include <WebServer.h>        // Servidor HTTP para ESP32.
+using LocalWebServer = WebServer;
+#else
+#error "Este firmware soporta solo ESP8266 o ESP32"
+#endif
                                // Permite conectarse a una red, obtener IP, etc.
-#include <ESP8266WebServer.h>  // Implementa un servidor HTTP minimalista.
-                               // Con él el ESP8266 puede responder a peticiones
-                               // GET desde un navegador web.
+                               // Con él el microcontrolador puede responder a
+                               // peticiones GET desde un navegador web.
 #include <PubSubClient.h>      // Librería MQTT de Nick O'Leary.
                                // Permite publicar mensajes y suscribirse a tópicos
                                // en un broker MQTT (p. ej. Mosquitto en la RPi).
@@ -99,10 +107,10 @@
 // ================================================================
 
 // ── Servidor web ─────────────────────────────────────────────────
-// ESP8266WebServer gestiona peticiones HTTP entrantes.
+// LocalWebServer gestiona peticiones HTTP entrantes.
 // El parámetro 80 es el puerto TCP estándar para HTTP.
 // Los clientes (navegadores) se conectan a http://<IP_del_ESP>/
-ESP8266WebServer server(80);
+LocalWebServer server(80);
 
 // ── Clientes MQTT ────────────────────────────────────────────────
 // WiFiClient es la capa de transporte TCP/IP sobre Wi-Fi.
@@ -124,12 +132,6 @@ unsigned long lastMqttAttemptMs = 0;
 
 // Temporizador de reconexión Wi-Fi (runtime).
 unsigned long lastWifiAttemptMs = 0;
-
-// Intervalo mínimo entre intentos de reconexión MQTT (5 segundos).
-// UL = unsigned long literal, evita desbordamientos en aritmética de tiempo.
-#define MQTT_RECONNECT_INTERVAL_MS 5000UL
-#define WIFI_RECONNECT_INTERVAL_MS 5000UL
-#define WIFI_BOOT_TIMEOUT_MS      30000UL
 
 // ================================================================
 // MÁQUINA DE ESTADOS DEL RIEGO
@@ -183,11 +185,19 @@ float         lastPercent  = 0.0f;  // Última humedad en % (0.0 = seco, 100.0 =
 int           lastRaw      = 0;     // Último valor crudo del ADC (0–1023)
 unsigned long lastSampleMs = 0;     // Momento de la última lectura (millis)
 
+uint32_t getDeviceIdSuffix() {
+#if defined(ESP8266)
+  return ESP.getChipId();
+#else
+  return (uint32_t)(ESP.getEfuseMac() & 0xFFFFFFUL);
+#endif
+}
+
 // ================================================================
 // readADC()  —  Lectura promediada del sensor de humedad
 // ================================================================
 // ¿POR QUÉ PROMEDIAR?
-//   El ADC (Convertidor Analógico-Digital) del ESP8266 tiene ruido
+//   El ADC (Convertidor Analógico-Digital) puede tener ruido
 //   eléctrico. Una sola lectura puede variar ±10 unidades. Tomar
 //   ANALOG_SAMPLES lecturas y promediarlas da un valor más estable.
 //
@@ -196,7 +206,7 @@ unsigned long lastSampleMs = 0;     // Momento de la última lectura (millis)
 //   un pequeño tiempo para "recargarse". ANALOG_DELAY_MS (5 ms por
 //   defecto) evita leer el mismo valor repetido.
 //
-// RETORNO: entero en el rango 0–1023 (resolución de 10 bits del ADC).
+// RETORNO: entero leído del ADC según resolución configurada por placa.
 //   • Suelo SECO  → valor ALTO  (poca conductividad → más voltaje → ~571)
 //   • Suelo HÚMEDO → valor BAJO (más conductividad → menos voltaje → ~336)
 //   (Esto parece contraintuitivo, pero es la lógica del sensor resistivo)
@@ -204,10 +214,20 @@ unsigned long lastSampleMs = 0;     // Momento de la última lectura (millis)
 int readADC() {
   long sum = 0;
   for (int i = 0; i < ANALOG_SAMPLES; i++) {
-    sum += analogRead(A0);    // Lee el pin analógico A0 (0–1023)
+    sum += analogRead(PIN_AO);    // Lee el pin analógico configurado
     delay(ANALOG_DELAY_MS);   // Pequeña pausa para estabilidad del ADC
   }
   return (int)(sum / ANALOG_SAMPLES);  // Devuelve el promedio entero
+}
+
+void setStatusLed(bool on) {
+  if (PIN_LED < 0) return;
+  if (PIN_LED == PIN_RELAY) return;
+#if LED_ACTIVE_LOW
+  digitalWrite(PIN_LED, on ? LOW : HIGH);
+#else
+  digitalWrite(PIN_LED, on ? HIGH : LOW);
+#endif
 }
 
 // ================================================================
@@ -262,10 +282,9 @@ float rawToPercent(int raw) {
 //                                  → electroválvula sin corriente
 //                                  → VÁLVULA CERRADA (estado seguro)
 //
-// LED INTEGRADO (active-LOW en NodeMCU):
-//   El LED_BUILTIN del NodeMCU está conectado con lógica invertida:
-//   digitalWrite(PIN_LED, LOW)  → LED ENCENDIDO (regando)
-//   digitalWrite(PIN_LED, HIGH) → LED APAGADO   (en reposo)
+// LED INTEGRADO:
+//   La polaridad se define en config.h con LED_ACTIVE_LOW para soportar
+//   NodeMCU (active-low) y ESP32 Dev Module (normalmente active-high).
 //
 // USO DE millis() EN LUGAR DE delay():
 //   delay(5000) bloquea el procesador 5 s — durante ese tiempo no
@@ -317,9 +336,9 @@ void updateRelay(float pct) {
 
   // LED: refleja visualmente si el riego está activo.
   // Operador ternario: condición ? valor_si_true : valor_si_false
-  // LOW  → LED encendido  (active-low)   cuando estamos en WATERING
-  // HIGH → LED apagado    (active-low)   en cualquier otro estado
-  digitalWrite(PIN_LED, (relayState == WATERING) ? LOW : HIGH);
+  // El helper setStatusLed aplica automáticamente la polaridad declarada
+  // en config.h.
+  setStatusLed(relayState == WATERING);
 }
 
 // ================================================================
@@ -393,7 +412,7 @@ void handleRoot() {
 
 // ── GET /json  →  Datos en formato JSON ─────────────────────────
 // Útil para dashboards, scripts, o cualquier sistema que consuma datos
-// del ESP8266 directamente por HTTP sin pasar por MQTT.
+// del dispositivo directamente por HTTP sin pasar por MQTT.
 // Ejemplo de respuesta:
 //   {"raw":450,"percent":51.5,"watering":false,"cooldown":false,
 //    "state":"WET","last_watered_sec":120}
@@ -442,7 +461,7 @@ void handleJson() {
 //
 // PARÁMETROS:
 //   topic   : cadena C con el nombre del tópico del mensaje recibido
-//             (ej: "commands/esp8266")
+//             (ej: "commands/esp32_01")
 //   payload : array de bytes con el contenido del mensaje.
 //             ⚠ NO tiene terminador '\0', no es un string directamente.
 //   length  : número de bytes válidos en payload.
@@ -480,7 +499,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     // ── Paso 4: Activar riego si el sistema está en reposo ─────
     if (relayState == IDLE) {
       digitalWrite(PIN_RELAY, HIGH);  // HIGH → relé activo → válvula abierta
-      digitalWrite(PIN_LED,   LOW);   // LOW  → LED encendido (active-low)
+      setStatusLed(true);
       relayStartMs = millis();        // Registrar inicio del riego
       relayState   = WATERING;        // Transición a estado WATERING
       Serial.println("[MQTT] Comando 'water' recibido. Riego iniciado.");
@@ -651,7 +670,7 @@ void publicarMQTT() {
 // setup()  —  Inicialización del sistema (se ejecuta UNA SOLA VEZ)
 // ================================================================
 // En Arduino, setup() es la función de arranque. Se ejecuta una vez
-// al encender o resetear el ESP8266. Aquí configuramos todo antes
+// al encender o resetear el microcontrolador. Aquí configuramos todo antes
 // de entrar al bucle principal (loop()).
 // ================================================================
 void setup() {
@@ -662,17 +681,24 @@ void setup() {
   Serial.begin(115200);
   Serial.println("\n[INICIO] humedadSueloK8");
 
+#if defined(ESP32)
+  analogReadResolution(12);
+  analogSetPinAttenuation(PIN_AO, ADC_11db);
+#endif
+
   // ── Configuración de pines ────────────────────────────────────
   // pinMode() define si un pin es entrada (INPUT) o salida (OUTPUT).
   pinMode(PIN_DO,    INPUT);   // DO del sensor: lectura digital (informativo)
   pinMode(PIN_RELAY, OUTPUT);  // Control del relé: salida digital
-  pinMode(PIN_LED,   OUTPUT);  // LED integrado: salida digital
+  if (PIN_LED >= 0) {
+    pinMode(PIN_LED, OUTPUT);  // LED integrado: salida digital
+  }
 
   // ── Estado seguro al arranque ─────────────────────────────────
   // Al arrancar siempre ponemos el relé inactivo para evitar que la
-  // válvula quede abierta por un reinicio inesperado del ESP8266.
+  // válvula quede abierta por un reinicio inesperado del dispositivo.
   digitalWrite(PIN_RELAY, LOW);   // LOW → relé inactivo → válvula CERRADA (seguro)
-  digitalWrite(PIN_LED,   HIGH);  // HIGH → LED apagado (active-low: HIGH = apagado)
+  setStatusLed(false);
 
   // ── Conexión Wi-Fi ────────────────────────────────────────────
   // WiFi.begin() inicia el proceso de conexión en segundo plano.
@@ -722,7 +748,7 @@ void setup() {
       "%.*s-%06X",
       prefixMaxLen,
       MQTT_CLIENT_ID,
-      ESP.getChipId()
+      (unsigned long)getDeviceIdSuffix()
     );
     Serial.printf("[MQTT] ClientId dinámico: %s\n", mqttClientIdDynamic);
 
@@ -736,7 +762,7 @@ void setup() {
 // loop()  —  Bucle principal (se ejecuta CONTINUAMENTE)
 // ================================================================
 // En Arduino, loop() es el corazón del programa. Se llama repetidamente
-// sin parar mientras el ESP8266 está encendido.
+// sin parar mientras el microcontrolador está encendido.
 //
 // PRINCIPIO CLAVE: NO BLOQUEANTE
 //   Usamos millis() para temporizar tareas en lugar de delay().

@@ -89,9 +89,10 @@ def _on_message(client, userdata, msg):
         payload = {mappings.get(k, k): v for k, v in payload.items()}
 
     logger.debug("Message from %s: %s", source, payload)
-    if source == "esp8266" and "last_watered_sec" not in payload:
+    if source.startswith("esp") and "last_watered_sec" not in payload:
         logger.warning(
-            "ESP8266 payload sin 'last_watered_sec'. keys=%s payload=%s",
+            "Payload %s sin 'last_watered_sec'. keys=%s payload=%s",
+            source,
             sorted(payload.keys()),
             payload,
         )
@@ -122,8 +123,8 @@ def _on_message(client, userdata, msg):
                 "unix_s",
             )
         else:
-            # ESP8266 sends -1 after boot when it has no in-memory irrigation
-            # history yet. We keep the last known timestamp already stored.
+            # ESP devices send -1 after boot when there is no in-memory
+            # irrigation history yet. We keep the last known timestamp.
             logger.info(
                 "Ignoring sentinel last_watered_sec=-1 from %s; "
                 "preserving previous last_watering_at_epoch",

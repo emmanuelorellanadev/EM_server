@@ -6,9 +6,11 @@
     "password": "",
     "topics": {
       "esp8266": "sensors/esp8266",
+      "esp32_01": "sensors/esp32_01",
       "raspberrypi": "sensors/raspberrypi",
       "all": "sensors/#",
       "cmd_esp8266": "commands/esp8266",
+      "cmd_esp32_01": "commands/esp32_01",
       "device_status": "devices/+/status"
     },
     "client_id_subscriber": "em_server_subscriber",
@@ -29,6 +31,9 @@
   },
   "field_mappings": {
     "esp8266": {
+      "percent": "soil_humidity"
+    },
+    "esp32_01": {
       "percent": "soil_humidity"
     }
   }

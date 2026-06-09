@@ -19,7 +19,7 @@
 // ================================================================
 // Wi-Fi  —  Credenciales de tu red local
 // ================================================================
-// El ESP8266 se conecta a tu red doméstica/empresarial por Wi-Fi.
+// El dispositivo (ESP8266 o ESP32) se conecta a tu red Wi-Fi local.
 // Reemplaza los valores entre comillas con los de tu red real.
 // SSID: nombre de la red (el que aparece al buscar Wi-Fi en tu celular)
 // PASS: contraseña de la red (distingue mayúsculas/minúsculas)
@@ -27,7 +27,7 @@
 #define WIFI_PASS "TU_CONTRASENA"    // Contraseña de tu red
 
 // ================================================================
-// Pines  —  Conexión física ESP8266 ↔ componentes
+// Pines  —  Conexión física ESP8266/ESP32 ↔ componentes
 // ================================================================
 // IMPORTANTE: Usamos la numeración GPIO real, NO la etiqueta impresa
 // en la placa (D1, D5, etc.). La tabla de conversión es:
@@ -37,17 +37,29 @@
 
 // ── Salida digital del sensor K8/C11 ─────────────────────────────
 // El sensor tiene dos salidas:
-//   AO (Analog Output)  → conectar a A0 (único pin ADC del ESP8266)
+//   AO (Analog Output)  → conectar a PIN_AO (definido por placa)
 //   DO (Digital Output) → conectar aquí (PIN_DO)
 // DO genera HIGH/LOW según un potenciómetro de umbral en el sensor.
 // En este firmware solo usamos DO de forma informativa; el control
 // real del riego viene de la lectura analógica (más precisa).
+// Mapea pines por plataforma para mantener un solo config.h.
+#if defined(ESP32)
+#define PIN_DO 36
+#else
 // D5 en NodeMCU V3 = GPIO 14
 #define PIN_DO 14
+#endif
+
+// ── Pin analógico AO del sensor ───────────────────────────────────
+#if defined(ESP32)
+#define PIN_AO 13
+#else
+#define PIN_AO A0
+#endif
 
 // ── Pin de control del módulo relé ───────────────────────────────
 // El relé es un interruptor electromecánico controlado eléctricamente.
-// Permite que el ESP8266 (3.3 V, señales débiles) controle cargas de
+// Permite que el microcontrolador (3.3 V, señales débiles) controle cargas de
 // alto voltaje (12 V DC de la electroválvula) de forma segura.
 //
 // Este módulo relé es ACTIVE-HIGH:
@@ -57,30 +69,55 @@
 //                                 → electroválvula sin corriente → SIN AGUA
 //                                 → ESTADO SEGURO AL ARRANQUE
 //
+#if defined(ESP32)
+#define PIN_RELAY 12
+#else
 // D1 en NodeMCU V3 = GPIO 5
 #define PIN_RELAY 5
+#endif
 
-// ── LED integrado del NodeMCU ─────────────────────────────────────
-// NodeMCU tiene un LED azul/verde soldado en la placa conectado al
-// GPIO2 (D4). Es ACTIVE-LOW, lo que significa lógica invertida:
-//   digitalWrite(PIN_LED, LOW)  → LED ENCENDIDO (indica que está regando)
-//   digitalWrite(PIN_LED, HIGH) → LED APAGADO
+// ── LED integrado ──────────────────────────────────────────────────
+// La polaridad depende de la placa y se controla con LED_ACTIVE_LOW.
 // LED_BUILTIN es una constante predefinida que apunta al pin correcto
 // según la placa seleccionada en Arduino IDE.
+#if defined(ESP32)
+#define PIN_LED 2
+#else
+#if !defined(LED_BUILTIN)
+#define LED_BUILTIN 2
+#endif
 #define PIN_LED LED_BUILTIN
+#endif
+
+// Lógica del LED:
+//   1 = active-low  (NodeMCU ESP8266 típico)
+//   0 = active-high (ESP32 DevKit V1 típico)
+// Ajusta este valor según tu placa para que el LED refleje correctamente
+// el estado de riego.
+#if defined(ESP32)
+#define LED_ACTIVE_LOW 0
+#else
+#define LED_ACTIVE_LOW 1
+#endif
+
+// ================================================================
+// Tiempos internos de reconexión (runtime)
+// ================================================================
+#define MQTT_RECONNECT_INTERVAL_MS 5000UL
+#define WIFI_RECONNECT_INTERVAL_MS 5000UL
+#define WIFI_BOOT_TIMEOUT_MS      30000UL
 
 // ================================================================
 // Calibración ADC  ← ¡AJUSTA ESTO SEGÚN TU SENSOR ESPECÍFICO!
 // ================================================================
-// El ADC (Convertidor Analógico-Digital) del ESP8266 lee voltajes
-// en el pin A0 y los convierte a un número entero entre 0 y 1023.
+// El ADC lee voltajes en PIN_AO y los convierte a un valor digital.
 //
 // El sensor de humedad genera un voltaje que varía según la humedad:
 //   Suelo SECO  → alta resistencia → más voltaje → ADC da valor ALTO (~571)
 //   Suelo HÚMEDO → baja resistencia → menos voltaje → ADC da valor BAJO (~336)
 //
 // PROCEDIMIENTO DE CALIBRACIÓN (hazlo una sola vez):
-//   1. Conecta el sensor al ESP8266 y abre el Monitor Serie (115200 baud).
+//   1. Conecta el sensor a la placa y abre el Monitor Serie (115200 baud).
 //   2. Pon el sensor en el AIRE (completamente seco): anota el valor Raw.
 //      → Ese valor es tu RAW_DRY.
 //   3. Sumerge el sensor en un vaso de AGUA: anota el valor Raw.
@@ -143,7 +180,7 @@
 // ================================================================
 // Lectura ADC  —  Parámetros de estabilidad de señal
 // ================================================================
-// El ADC del ESP8266 no es de alta precisión y tiene ruido eléctrico.
+// El ADC puede tener ruido eléctrico según la placa y el entorno.
 // Promediar varias muestras mejora significativamente la estabilidad
 // de las lecturas sin necesidad de hardware adicional.
 
@@ -185,30 +222,30 @@
 // VENTAJAS DE MQTT PARA IoT:
 //   • Muy bajo consumo de ancho de banda (cabecera mínima de 2 bytes)
 //   • Tolerante a redes inestables (reconexión automática)
-//   • Desacopla productores y consumidores: el ESP8266 publica datos
+//   • Desacopla productores y consumidores: el dispositivo publica datos
 //     sin saber quién los lee; la RPi los recibe sin saber cuántos
 //     dispositivos los generan.
 //
 // CÓMO FUNCIONA EN ESTE PROYECTO:
 //
-//   PUBLICACIÓN (ESP8266 → Raspberry Pi):
-//     El ESP8266 envía lecturas del sensor cada BACKGROUND_SAMPLE_MS.
-//     Tópico: sensors/esp8266
+//   PUBLICACIÓN (dispositivo → Raspberry Pi):
+//     El dispositivo envía lecturas del sensor cada BACKGROUND_SAMPLE_MS.
+//     Tópico: definido por MQTT_TOPICO
 //     Ejemplo: {"percent":51.5,"state":"WET","watering":false,
 //               "on_threshold_percent":35,"relay_on_time_s":1.0}
 //     La Raspberry Pi (mqtt_client.py) escucha "sensors/#" y guarda
 //     cada mensaje en la base de datos SQLite.
 //
-//   SUSCRIPCIÓN (Raspberry Pi → ESP8266):
-//     El ESP8266 escucha comandos de riego remoto.
-//     Tópico: commands/esp8266
+//   SUSCRIPCIÓN (Raspberry Pi → dispositivo):
+//     El dispositivo escucha comandos de riego remoto.
+//     Tópico: definido por MQTT_TOPICO_CMD
 //     Comando: {"action":"water"}
 //     Efecto: activa el relé y enciende el LED, igual que si el
 //             sensor detectara suelo seco localmente.
 //
 // GLOSARIO:
 //   BROKER    : servidor central que recibe y distribuye mensajes
-//   TÓPICO    : nombre jerárquico del canal (ej: "sensors/esp8266")
+//   TÓPICO    : nombre jerárquico del canal (ej: "sensors/esp32_01")
 //   QoS       : calidad de servicio (0 = sin confirmación, 1 = con confirmación)
 //   CLIENT_ID : nombre único de este dispositivo ante el broker
 //
@@ -231,24 +268,36 @@
 
 // Identificador único de ESTE dispositivo ante el broker.
 // Si dos dispositivos usan el mismo CLIENT_ID, el broker desconecta
-// al anterior. Cambia este nombre si tienes varios ESP8266.
-#define MQTT_CLIENT_ID   "esp8266-invernadero" // ID único por dispositivo
+// al anterior. Cambia este nombre si tienes varios nodos.
+#define MQTT_CLIENT_ID   "esp32_01" // ID único por dispositivo
 
-// Tópico de PUBLICACIÓN: el ESP8266 envía sus datos aquí.
+// Tópico de PUBLICACIÓN: el dispositivo envía sus datos aquí.
 // La Raspberry Pi (mqtt_client.py) está suscrita a "sensors/#"
 // para recibir datos de todos los dispositivos del invernadero.
+#if defined(ESP32)
+#define MQTT_TOPICO      "sensors/esp32_01"
+#else
 #define MQTT_TOPICO      "sensors/esp8266"
+#endif
 
-// Tópico de SUSCRIPCIÓN: el ESP8266 escucha comandos aquí.
+// Tópico de SUSCRIPCIÓN: el dispositivo escucha comandos aquí.
 // El dashboard de la Raspberry Pi publica {"action":"water"} en
 // este tópico para activar el riego de forma remota.
+#if defined(ESP32)
+#define MQTT_TOPICO_CMD  "commands/esp32_01"
+#else
 #define MQTT_TOPICO_CMD  "commands/esp8266"
+#endif
 
 // Tópico de PRESENCIA del dispositivo (online/offline).
-// El ESP8266 publica "online" con retain al conectarse y define un
+// El dispositivo publica "online" con retain al conectarse y define un
 // Last Will "offline" para que el broker lo publique si el dispositivo
 // se cae sin desconectarse limpiamente.
+#if defined(ESP32)
+#define MQTT_STATUS_TOPIC "devices/esp32_01/status"
+#else
 #define MQTT_STATUS_TOPIC "devices/esp8266/status"
+#endif
 
 // Credenciales de autenticación del broker MQTT.
 // Dejar ambas vacías ("") si el broker Mosquitto no requiere usuario/contraseña.

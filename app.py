@@ -77,7 +77,14 @@ LAST_WATERED_SEC_FIELD = "last_watered_sec"
 LAST_WATERING_EPOCH_FIELD = "last_watering_at_epoch"
 RELAY_ON_TIME_FIELD = "relay_on_time_s"
 ON_THRESHOLD_FIELD = "on_threshold_percent"
-TREND_FIELDS = ("soil_humidity", "on_threshold_percent")
+ESP_PANEL_SOURCES = {"esp8266", "esp32_01"}
+DEFAULT_TREND_SOURCE = "esp8266"
+SOURCE_TREND_FIELDS: dict[str, tuple[str, ...]] = {
+    "esp8266": ("soil_humidity", "on_threshold_percent"),
+    "esp32_01": ("soil_humidity", "on_threshold_percent"),
+    "raspberrypi": ("temperature", "humidity", "pressure"),
+}
+DEFAULT_TREND_FIELDS = SOURCE_TREND_FIELDS[DEFAULT_TREND_SOURCE]
 
 # Trend ranges requested for the irrigation chart selector.
 #
@@ -131,6 +138,11 @@ def is_boolean_field(field: str) -> bool:
 @app.template_global()
 def should_render_field(field: str) -> bool:
     return field not in HIDDEN_FIELDS
+
+
+@app.template_global()
+def is_esp_panel_source(source: str) -> bool:
+    return source in ESP_PANEL_SOURCES
 
 
 def format_last_watering(epoch_value) -> str:
@@ -422,15 +434,15 @@ def _build_trend_response(source: str, range_key: str) -> dict:
     """Build trend payload for one source and one selected range.
 
     This function is intentionally straightforward so it is easy to teach and
-    maintain. It only supports the irrigation-focused fields listed in
-    TREND_FIELDS.
+    maintain. Supported fields are resolved by source in SOURCE_TREND_FIELDS.
     """
     cfg = TREND_RANGE_CONFIG[range_key]
     now = datetime.now(DISPLAY_TZ)
     since = now - cfg["delta"]
+    trend_fields = SOURCE_TREND_FIELDS.get(source, DEFAULT_TREND_FIELDS)
 
     datasets: dict[str, list[dict]] = {}
-    for field in TREND_FIELDS:
+    for field in trend_fields:
         # Backward-compatible access:
         # if get_field_history() exists in database.py we use it.
         # If not (for example, stale deployment files), we gracefully
@@ -466,7 +478,7 @@ def _build_trend_response(source: str, range_key: str) -> dict:
         "source": source,
         "range": range_key,
         "range_label": cfg["label"],
-        "fields": list(TREND_FIELDS),
+        "fields": list(trend_fields),
         "datasets": datasets,
     }
 
@@ -562,7 +574,7 @@ def api_trend():
           }
         }
     """
-    source = (request.args.get("source") or "esp8266").strip()
+    source = (request.args.get("source") or DEFAULT_TREND_SOURCE).strip()
     range_key = (request.args.get("range") or "1h").strip().lower()
 
     if range_key not in TREND_RANGE_CONFIG:
@@ -615,28 +627,31 @@ def _mqtt_publish_command(mqtt_cfg: dict, topic: str, payload: dict) -> None:
 
 @app.route("/api/command/water", methods=["POST"])
 def api_command_water():
-    """Send a manual watering command to the ESP8266 via MQTT.
+    """Send a manual watering command to an ESP device via MQTT.
 
-    Publishes ``{"action": "water"}`` to the command topic configured in
-    ``config.json → mqtt.topics.cmd_esp8266``.
-
-    The ESP8266 subscribes to that topic (MQTT_TOPICO_CMD in config.h) and,
-    upon receiving the command, activates the irrigation valve for
-    DURACION_RIEGO_MS milliseconds, cancelling any active cooldown.
-
-    Returns:
-        200 {"ok": true, "topic": "commands/esp8266"}   — command sent
-        503 {"error": "MQTT not configured"}             — no config loaded
-        502 {"error": "<reason>"}                        — broker unreachable
+    The target source can be passed in the JSON body as ``{"source": "esp32_01"}``.
+    If omitted, defaults to ``esp8266`` for backward compatibility.
     """
     mqtt_cfg = _config.get("mqtt")
     if not mqtt_cfg:
         return jsonify({"error": "MQTT not configured"}), 503
 
-    topic = mqtt_cfg.get("topics", {}).get("cmd_esp8266", "commands/esp8266")
+    body = request.get_json(silent=True) or {}
+    source = str(body.get("source") or "esp8266").strip().lower()
+    if not source:
+        source = "esp8266"
+
+    topic_key = f"cmd_{source}"
+    topics = mqtt_cfg.get("topics", {})
+    topic = topics.get(topic_key)
+    if not topic and source == "esp8266":
+        topic = topics.get("cmd_esp8266", "commands/esp8266")
+    if not topic:
+        return jsonify({"error": f"Topic de comando no configurado para {source}"}), 400
+
     try:
         _mqtt_publish_command(mqtt_cfg, topic, {"action": "water"})
-        return jsonify({"ok": True, "topic": topic})
+        return jsonify({"ok": True, "topic": topic, "source": source})
     except Exception as exc:
         # Log the full error server-side but do not expose internal details
         # (stack traces, hostnames, …) to the API caller to avoid information

@@ -4,12 +4,41 @@
 
 set -euo pipefail
 
-EM_DIR="/home/pi/EM_server"
+# Allow overrides via environment variables:
+#   sudo SERVICE_USER=bitspi EM_DIR=/home/bitspi/Development/EM/EM_server bash setup.sh
+DEFAULT_SERVICE_USER="${SUDO_USER:-${USER}}"
+SERVICE_USER="${SERVICE_USER:-$DEFAULT_SERVICE_USER}"
+
+DEFAULT_EM_DIR="/home/$SERVICE_USER/Development/EM/EM_server"
+LEGACY_EM_DIR="/home/$SERVICE_USER/EM_server"
+
+if [ -z "${EM_DIR:-}" ]; then
+    if [ -d "$DEFAULT_EM_DIR" ]; then
+        EM_DIR="$DEFAULT_EM_DIR"
+    elif [ -d "$LEGACY_EM_DIR" ]; then
+        EM_DIR="$LEGACY_EM_DIR"
+    else
+        EM_DIR="$(pwd)"
+    fi
+fi
+
 VENV="$EM_DIR/venv"
 
 echo "===================================================================="
 echo " EM Server – Setup para Raspbian"
 echo "===================================================================="
+echo "  SERVICE_USER: $SERVICE_USER"
+echo "  EM_DIR:       $EM_DIR"
+
+if [ ! -f "$EM_DIR/requirements.txt" ]; then
+    echo "ERROR: No se encontro requirements.txt en: $EM_DIR"
+    exit 1
+fi
+
+if [ ! -d "$EM_DIR/systemd" ]; then
+    echo "ERROR: No se encontro carpeta systemd en: $EM_DIR"
+    exit 1
+fi
 
 # ---- 1. System packages -------------------------------------------------
 echo ""
@@ -55,9 +84,20 @@ fi
 # ---- 5. Install systemd services ----------------------------------------
 echo ""
 echo "[5/6] Instalando servicios systemd..."
-cp "$EM_DIR/systemd/em-mqtt-client.service"    /etc/systemd/system/
-cp "$EM_DIR/systemd/em-web-dashboard.service"  /etc/systemd/system/
-cp "$EM_DIR/systemd/em-sensehat-client.service" /etc/systemd/system/
+
+install_service_from_template() {
+    local template_path="$1"
+    local target_path="/etc/systemd/system/$(basename "$template_path")"
+
+    sed \
+        -e "s|^User=.*$|User=$SERVICE_USER|" \
+        -e "s|/home/pi/EM_server|$EM_DIR|g" \
+        "$template_path" > "$target_path"
+}
+
+install_service_from_template "$EM_DIR/systemd/em-mqtt-client.service"
+install_service_from_template "$EM_DIR/systemd/em-web-dashboard.service"
+install_service_from_template "$EM_DIR/systemd/em-sensehat-client.service"
 
 systemctl daemon-reload
 systemctl enable em-mqtt-client em-web-dashboard em-sensehat-client
@@ -73,7 +113,7 @@ echo ""
 echo "===================================================================="
 echo " ✅  Instalación completa."
 echo ""
-echo "   Dashboard web: http://$(hostname -I | awk '{print $1}'):5000"
+echo "   Dashboard web: http://$(hostname -I | awk '{print $1}'):8080"
 echo ""
 echo "   Servicios activos:"
 echo "     systemctl status em-mqtt-client"

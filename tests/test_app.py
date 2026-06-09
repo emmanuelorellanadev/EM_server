@@ -256,3 +256,69 @@ def test_api_command_water_broker_error(client, monkeypatch):
     assert "error" in body
     assert "broker offline" not in body["error"]  # internal details hidden
     assert "unreachable-host" not in body["error"]
+
+
+def test_api_command_water_esp32_topic(client, monkeypatch):
+    """Publishes watering command to esp32_01 topic when requested."""
+    c, _ = client
+    monkeypatch.setattr(flask_app, "_config", {
+        "mqtt": {
+            "broker": "localhost",
+            "port": 1883,
+            "username": "",
+            "password": "",
+            "topics": {
+                "cmd_esp8266": "commands/esp8266",
+                "cmd_esp32_01": "commands/esp32_01",
+            },
+        }
+    })
+    published = []
+    monkeypatch.setattr(flask_app, "_mqtt_publish_command",
+                        lambda cfg, topic, payload: published.append((topic, payload)))
+
+    resp = c.post("/api/command/water", json={"source": "esp32_01"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["source"] == "esp32_01"
+    assert data["topic"] == "commands/esp32_01"
+    assert published[0] == ("commands/esp32_01", {"action": "water"})
+
+
+def test_index_renders_esp32_panel(client):
+    """ESP32 source should use the same irrigation card layout as ESP8266."""
+    c, db = client
+    database.insert_reading(db, "esp32_01", "soil_humidity", 44.0, "%")
+    database.insert_reading(db, "esp32_01", "watering", 0.0)
+    database.insert_reading(db, "esp32_01", "online", 1.0)
+
+    resp = c.get("/")
+    assert resp.status_code == 200
+    assert b"panel-esp32_01" in resp.data
+    assert b"water-cmd-status-esp32_01" in resp.data
+
+
+def test_index_trend_label_placeholder_present(client):
+    """Trend title includes source label placeholder for active ESP panel."""
+    c, _ = client
+    resp = c.get("/")
+    assert resp.status_code == 200
+    assert b'id="trend-source-label"' in resp.data
+
+
+def test_api_trend_raspberrypi_fields(client):
+    """Raspberry Pi trend endpoint returns separate datasets by environmental field."""
+    c, db = client
+    database.insert_reading(db, "raspberrypi", "temperature", 22.5, "°C")
+    database.insert_reading(db, "raspberrypi", "humidity", 58.1, "%")
+    database.insert_reading(db, "raspberrypi", "pressure", 1012.0, "hPa")
+
+    resp = c.get("/api/trend?source=raspberrypi&range=1h")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["source"] == "raspberrypi"
+    assert set(data["fields"]) == {"temperature", "humidity", "pressure"}
+    assert "temperature" in data["datasets"]
+    assert "humidity" in data["datasets"]
+    assert "pressure" in data["datasets"]

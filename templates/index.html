@@ -23,7 +23,7 @@
         <div class="source-panel {% if loop.first %}active{% endif %}" id="panel-{{ src }}">
           {% set source_fields = latest_by_source.get(src, {}) %}
           <div class="cards-grid">
-            {% if src == 'esp8266' %}
+            {% if is_esp_panel_source(src) %}
               {#
                 ESP8266 usa un layout intencional para evitar duplicados:
                 1) Humedad de suelo
@@ -97,16 +97,16 @@
             {% endif %}
           </div>
 
-          {# Botón de riego manual — solo visible para el panel del ESP8266 #}
-          {% if src == 'esp8266' %}
+              {# Botón de riego manual — solo visible para paneles ESP #}
+          {% if is_esp_panel_source(src) %}
           <div class="command-panel">
-            <button class="cmd-btn" onclick="sendWaterCommand(this)">
+            <button class="cmd-btn" onclick="sendWaterCommand(this, '{{ src }}')">
               💧 Activar Riego Manual
             </button>
-            <span class="cmd-status" id="water-cmd-status"></span>
+            <span class="cmd-status" id="water-cmd-status-{{ src }}"></span>
             <p class="cmd-hint">
               Envía una instrucción MQTT al invernadero para activar el riego
-              por el tiempo configurado en el ESP8266 (DURACION_RIEGO_MS en config.h).
+              por el tiempo configurado en {{ src }} (RELAY_ON_TIME_MS en config.h).
             </p>
           </div>
           {% endif %}
@@ -124,7 +124,7 @@
 
 <section class="chart-section">
   <div class="section-header">
-    <h2>Tendencia de Riego (ESP8266)</h2>
+    <h2 id="trend-title">Tendencia de Riego (<span id="trend-source-label">ESP8266</span>)</h2>
     <div class="trend-controls">
       <label for="trend-range">Rango:</label>
       <select id="trend-range" onchange="onTrendRangeChange()">
@@ -136,7 +136,25 @@
       </select>
     </div>
   </div>
-  <canvas id="trend-chart" height="100"></canvas>
+  <div id="trend-chart-single-wrapper">
+    <canvas id="trend-chart" height="100"></canvas>
+  </div>
+  <div id="trend-chart-rasp-wrapper" class="hidden">
+    <div class="charts-grid-rasp">
+      <div class="chart-card">
+        <h3>Temperatura</h3>
+        <canvas id="trend-chart-temperature" height="140"></canvas>
+      </div>
+      <div class="chart-card">
+        <h3>Humedad</h3>
+        <canvas id="trend-chart-humidity" height="140"></canvas>
+      </div>
+      <div class="chart-card">
+        <h3>Presión</h3>
+        <canvas id="trend-chart-pressure" height="140"></canvas>
+      </div>
+    </div>
+  </div>
 </section>
 {% endblock %}
 
@@ -144,6 +162,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
 <script>
+  syncTrendSourceWithActivePanel({ reload: false });
   loadTrendChart(getSelectedTrendRange());
 
   function showSource(src, event) {
@@ -151,6 +170,7 @@
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('panel-' + src).classList.add('active');
     event.target.classList.add('active');
+    syncTrendSourceWithActivePanel();
   }
 
   async function refreshLatest() {
@@ -159,6 +179,7 @@
     const resp = await fetch('/api/latest');
     const data = await resp.json();
     updateCards(data);
+    syncTrendSourceWithActivePanel({ reload: false });
     await loadTrendChart(getSelectedTrendRange());
     btn.textContent = '↺ Actualizar';
   }

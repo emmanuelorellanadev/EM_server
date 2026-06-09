@@ -91,6 +91,146 @@ function formatThreshold(value) {
 // Trend chart
 // ------------------------------------------------------------------ //
 let trendChart = null;
+const raspberryTrendCharts = {
+  temperature: null,
+  humidity: null,
+  pressure: null,
+};
+const TREND_COLORS = {
+  soil_humidity: '#2e7d32',
+  on_threshold_percent: '#d32f2f',
+  temperature: '#e53935',
+  humidity: '#1e88e5',
+  pressure: '#6a1b9a',
+};
+const FIELD_UNITS = {
+  soil_humidity: '%',
+  on_threshold_percent: '%',
+  temperature: '°C',
+  humidity: '%',
+  pressure: 'hPa',
+};
+
+function destroyChartInstance(chart) {
+  if (chart) chart.destroy();
+}
+
+function destroyAllTrendCharts() {
+  destroyChartInstance(trendChart);
+  trendChart = null;
+  Object.keys(raspberryTrendCharts).forEach(field => {
+    destroyChartInstance(raspberryTrendCharts[field]);
+    raspberryTrendCharts[field] = null;
+  });
+}
+
+function trendChartLayoutForSource(source) {
+  const single = document.getElementById('trend-chart-single-wrapper');
+  const multi = document.getElementById('trend-chart-rasp-wrapper');
+  if (!single || !multi) return;
+
+  if (source === 'raspberrypi') {
+    single.classList.add('hidden');
+    multi.classList.remove('hidden');
+  } else {
+    multi.classList.add('hidden');
+    single.classList.remove('hidden');
+  }
+}
+
+function formatTrendDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat('es-GT', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  }).format(date);
+}
+
+function formatTrendTooltipLabel(ctx) {
+  const unit = FIELD_UNITS[ctx.dataset.fieldKey] || '';
+  return `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}${unit ? ` ${unit}` : ''}`;
+}
+
+function buildTrendOptions(yTitle, { yMin = null, yMax = null } = {}) {
+  const yConfig = {
+    title: { display: true, text: yTitle },
+  };
+  if (Number.isFinite(yMin)) yConfig.min = yMin;
+  if (Number.isFinite(yMax)) yConfig.max = yMax;
+
+  return {
+    responsive: true,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { position: 'top' },
+      tooltip: {
+        callbacks: {
+          title: items => (items.length > 0 ? formatTrendDate(items[0].parsed.x) : ''),
+          label: formatTrendTooltipLabel,
+        },
+      },
+    },
+    scales: {
+      x: {
+        type: 'time',
+        time: { tooltipFormat: 'dd/MM/yyyy HH:mm' },
+        title: { display: true, text: 'Fecha y hora (America/Guatemala)' },
+        ticks: { maxRotation: 30, maxTicksLimit: 10 },
+      },
+      y: yConfig,
+    },
+  };
+}
+
+function buildDataset(field, data, index = 0) {
+  const colorPalette = ['#4caf50', '#1e88e5', '#ff8f00'];
+  const color = TREND_COLORS[field] || colorPalette[index % colorPalette.length];
+  return {
+    label: fieldLabel(field),
+    fieldKey: field,
+    data,
+    borderColor: color,
+    backgroundColor: color + '22',
+    tension: 0.3,
+    pointRadius: 2,
+    borderWidth: field === 'on_threshold_percent' ? 2 : 3,
+    borderDash: field === 'on_threshold_percent' ? [8, 6] : [],
+    fill: false,
+  };
+}
+
+function initEspTrendChart(trendPayload) {
+  const canvas = document.getElementById('trend-chart');
+  if (!canvas) return;
+
+  const datasetsByField = trendPayload.datasets;
+  const fields = Object.keys(datasetsByField);
+  const datasets = fields.map((field, i) => buildDataset(field, datasetsByField[field] || [], i));
+
+  trendChart = new Chart(canvas, {
+    type: 'line',
+    data: { datasets },
+    options: buildTrendOptions('Humedad (%)', { yMin: 0, yMax: 100 }),
+  });
+}
+
+function initRaspberryTrendCharts(trendPayload) {
+  ['temperature', 'humidity', 'pressure'].forEach(field => {
+    const canvas = document.getElementById(`trend-chart-${field}`);
+    if (!canvas) return;
+
+    const unit = FIELD_UNITS[field] || '';
+    const yTitle = `${fieldLabel(field)}${unit ? ` (${unit})` : ''}`;
+    const dataset = buildDataset(field, trendPayload.datasets[field] || []);
+
+    raspberryTrendCharts[field] = new Chart(canvas, {
+      type: 'line',
+      data: { datasets: [dataset] },
+      options: buildTrendOptions(yTitle),
+    });
+  });
+}
 
 /**
  * Builds (or rebuilds) the irrigation trend chart.
@@ -98,72 +238,18 @@ let trendChart = null;
  * @param {object} trendPayload Response from GET /api/trend.
  */
 function initTrendChart(trendPayload) {
-  const canvas = document.getElementById('trend-chart');
-  if (!canvas || !trendPayload || !trendPayload.datasets) return;
+  if (!trendPayload || !trendPayload.datasets) return;
 
-  // Always destroy previous chart before creating a new one.
-  // This avoids memory leaks and duplicated canvases.
-  if (trendChart) {
-    trendChart.destroy();
-    trendChart = null;
+  const source = trendPayload.source || trendSource;
+  destroyAllTrendCharts();
+  trendChartLayoutForSource(source);
+
+  if (source === 'raspberrypi') {
+    initRaspberryTrendCharts(trendPayload);
+    return;
   }
 
-  const datasetsByField = trendPayload.datasets;
-  const fields = Object.keys(datasetsByField);
-  const colors = {
-    soil_humidity: '#2e7d32',
-    on_threshold_percent: '#d32f2f',
-  };
-
-  const formatDate = value => {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return String(value);
-    return new Intl.DateTimeFormat('es-GT', {
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit',
-    }).format(date);
-  };
-
-  const datasets = fields.map((field, i) => ({
-    label: fieldLabel(field),
-    data: datasetsByField[field] || [],
-    borderColor: colors[field] || ['#4caf50', '#1e88e5', '#ff8f00'][i % 3],
-    backgroundColor: (colors[field] || '#4caf50') + '22',
-    tension: 0.3,
-    pointRadius: 2,
-    borderWidth: field === 'on_threshold_percent' ? 2 : 3,
-    borderDash: field === 'on_threshold_percent' ? [8, 6] : [],
-    fill: false,
-  }));
-
-  trendChart = new Chart(canvas, {
-    type: 'line',
-    data: { datasets },
-    options: {
-      responsive: true,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { position: 'top' },
-        tooltip: { callbacks: {
-          title: items => (items.length > 0 ? formatDate(items[0].parsed.x) : ''),
-          label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} %`,
-        }},
-      },
-      scales: {
-        x: {
-          type: 'time',
-          time: { tooltipFormat: 'dd/MM/yyyy HH:mm' },
-          title: { display: true, text: 'Fecha y hora (America/Guatemala)' },
-          ticks: { maxRotation: 30, maxTicksLimit: 10 },
-        },
-        y: {
-          min: 0,
-          max: 100,
-          title: { display: true, text: 'Humedad (%)' },
-        },
-      },
-    },
-  });
+  initEspTrendChart(trendPayload);
 }
 
 // ------------------------------------------------------------------ //
@@ -261,13 +347,17 @@ function updateCards(data) {
  *
  * @param {HTMLElement} btn  The button element that triggered the action.
  */
-async function sendWaterCommand(btn) {
-  const statusEl = document.getElementById('water-cmd-status');
+async function sendWaterCommand(btn, source = 'esp8266') {
+  const statusEl = document.getElementById(`water-cmd-status-${source}`);
   btn.disabled = true;
   if (statusEl) statusEl.textContent = 'Enviando…';
 
   try {
-    const resp = await fetch('/api/command/water', { method: 'POST' });
+    const resp = await fetch('/api/command/water', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source }),
+    });
     const data = await resp.json();
     if (resp.ok) {
       if (statusEl) {
@@ -301,8 +391,55 @@ async function sendWaterCommand(btn) {
 // Load trend chart from history API
 // ------------------------------------------------------------------ //
 
-const TREND_SOURCE = 'esp8266';
+const DEFAULT_TREND_SOURCE = 'esp8266';
+let trendSource = DEFAULT_TREND_SOURCE;
 const TREND_RANGE_SELECT_ID = 'trend-range';
+const TREND_TITLE_BY_SOURCE = {
+  esp8266: 'Tendencia de Riego',
+  esp32_01: 'Tendencia de Riego',
+  raspberrypi: 'Tendencia Ambiental',
+};
+
+function getActiveSourcePanelId() {
+  const panel = document.querySelector('.source-panel.active');
+  return panel ? panel.id : '';
+}
+
+function sourceFromPanelId(panelId) {
+  const prefix = 'panel-';
+  if (!panelId || !panelId.startsWith(prefix)) return '';
+  return panelId.slice(prefix.length);
+}
+
+function updateTrendSourceLabel() {
+  const title = document.getElementById('trend-title');
+  if (title) {
+    title.innerHTML = `${TREND_TITLE_BY_SOURCE[trendSource] || 'Tendencia'} (<span id="trend-source-label">${trendSource.toUpperCase()}</span>)`;
+    return;
+  }
+
+  const label = document.getElementById('trend-source-label');
+  if (!label) return;
+  label.textContent = trendSource.toUpperCase();
+}
+
+function setTrendSource(source, { reload = true } = {}) {
+  if (!source) return;
+  trendSource = source;
+  updateTrendSourceLabel();
+  if (reload) {
+    loadTrendChart(getSelectedTrendRange());
+  }
+}
+
+function syncTrendSourceWithActivePanel({ reload = true } = {}) {
+  const source = sourceFromPanelId(getActiveSourcePanelId());
+  if (!source) {
+    updateTrendSourceLabel();
+    return;
+  }
+  setTrendSource(source, { reload });
+}
 
 /**
  * Reads the selected range from the selector.
@@ -321,7 +458,7 @@ function getSelectedTrendRange() {
  */
 async function loadTrendChart(rangeKey = '1h') {
   try {
-    const url = `/api/trend?source=${encodeURIComponent(TREND_SOURCE)}&range=${encodeURIComponent(rangeKey)}`;
+    const url = `/api/trend?source=${encodeURIComponent(trendSource)}&range=${encodeURIComponent(rangeKey)}`;
     const resp = await fetch(url);
     if (!resp.ok) {
       console.error(`loadTrendChart: API returned ${resp.status}`);
@@ -350,6 +487,7 @@ setInterval(async () => {
     if (!resp.ok) return;
     const data = await resp.json();
     updateCards(data);
+    syncTrendSourceWithActivePanel({ reload: false });
     await loadTrendChart(getSelectedTrendRange());
   } catch (_) { /* network error – ignore */ }
 }, 30000);

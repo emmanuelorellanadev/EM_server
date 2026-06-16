@@ -89,6 +89,19 @@
 #define PIN_LED LED_BUILTIN
 #endif
 
+// ── Sensor ambiental (ARD-360 / DHT) ───────────────────────────────
+// Habilita lectura de temperatura y humedad ambiental.
+// Requiere instalar la libreria "DHT sensor library" de Adafruit.
+#if defined(ESP32)
+#define ENABLE_AMBIENT_SENSOR 1
+#define PIN_AMBIENT 27
+#define AMBIENT_SENSOR_DHT22 1   // 1=DHT22, 0=DHT11
+#else
+#define ENABLE_AMBIENT_SENSOR 0
+#define PIN_AMBIENT -1
+#define AMBIENT_SENSOR_DHT22 1
+#endif
+
 // Lógica del LED:
 //   1 = active-low  (NodeMCU ESP8266 típico)
 //   0 = active-high (ESP32 DevKit V1 típico)
@@ -194,6 +207,17 @@
 // Sin esta pausa, las lecturas sucesivas pueden ser casi idénticas
 // porque el capacitor interno aún no se ha cargado completamente.
 #define ANALOG_DELAY_MS   5
+
+// Muestreo del sensor ambiental (temperatura y humedad relativa).
+#define AMBIENT_SAMPLE_MS 10000UL
+#define AMBIENT_SAMPLES   5
+#define AMBIENT_DELAY_MS  250
+
+// Ajuste fino opcional del DHT (calibracion por offset).
+// Ejemplo: si marca +1.0 C de mas, usar TEMP_OFFSET_C -1.0
+//          si marca -3 %RH de menos, usar HUM_OFFSET_PCT +3.0
+#define TEMP_OFFSET_C    0.0f
+#define HUM_OFFSET_PCT   0.0f
 
 // ================================================================
 // Muestreo en segundo plano  —  Frecuencia de lectura del sensor

@@ -133,6 +133,25 @@ main {
   line-height: 1.35;
 }
 
+.atmosphere .card-value {
+  font-size: 1rem;
+}
+
+.atmo-line {
+  display: flex;
+  justify-content: space-between;
+  gap: .8rem;
+  font-size: .9rem;
+}
+
+.atmo-label {
+  color: var(--muted);
+}
+
+.atmo-value {
+  font-weight: 700;
+}
+
 /* ---- Sensor colour accents ---------------------------------------- */
 .temperature .card-icon { color: #e53935; }
 .humidity    .card-icon { color: #1e88e5; }
@@ -228,6 +247,12 @@ main {
 .hidden { display: none; }
 
 .charts-grid-rasp {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+.charts-grid-esp32 {
   display: grid;
   grid-template-columns: 1fr;
   gap: 1rem;

@@ -101,6 +101,11 @@ using LocalWebServer = WebServer;
                                // Contiene: SSID, contraseña Wi-Fi, pines, umbrales,
                                // tiempos y parámetros MQTT. Créalo copiando
                                // config.example.h y editando con tus valores.
+#include <math.h>
+
+#if ENABLE_AMBIENT_SENSOR
+#include <DHT.h>
+#endif
 
 // ================================================================
 // OBJETOS GLOBALES
@@ -184,6 +189,49 @@ unsigned long lastWaterEndMs  = 0;  // cuándo terminó el último riego (0 = nu
 float         lastPercent  = 0.0f;  // Última humedad en % (0.0 = seco, 100.0 = saturado)
 int           lastRaw      = 0;     // Último valor crudo del ADC (0–1023)
 unsigned long lastSampleMs = 0;     // Momento de la última lectura (millis)
+
+float         lastAmbientTempC    = NAN;
+float         lastAmbientHumPct   = NAN;
+unsigned long lastAmbientSampleMs = 0;
+
+#if ENABLE_AMBIENT_SENSOR
+#if AMBIENT_SENSOR_DHT22
+#define AMBIENT_SENSOR_TYPE DHT22
+#else
+#define AMBIENT_SENSOR_TYPE DHT11
+#endif
+DHT ambientSensor(PIN_AMBIENT, AMBIENT_SENSOR_TYPE);
+
+bool readAmbient(float& outTempC, float& outHumPct) {
+  // DHT puede fallar por timing; tomamos varias muestras y promediamos.
+  float sumTemp = 0.0f;
+  float sumHum = 0.0f;
+  int validSamples = 0;
+
+  for (int i = 0; i < AMBIENT_SAMPLES; i++) {
+    float t = ambientSensor.readTemperature();
+    float h = ambientSensor.readHumidity();
+    if (!isnan(t) && !isnan(h)) {
+      sumTemp += t;
+      sumHum += h;
+      validSamples++;
+    }
+    if (i < AMBIENT_SAMPLES - 1) {
+      delay(AMBIENT_DELAY_MS);
+    }
+  }
+
+  if (validSamples == 0) return false;
+
+  outTempC = (sumTemp / (float)validSamples) + TEMP_OFFSET_C;
+  outHumPct = (sumHum / (float)validSamples) + HUM_OFFSET_PCT;
+
+  if (outHumPct < 0.0f) outHumPct = 0.0f;
+  if (outHumPct > 100.0f) outHumPct = 100.0f;
+
+  return true;
+}
+#endif
 
 uint32_t getDeviceIdSuffix() {
 #if defined(ESP8266)
@@ -399,9 +447,12 @@ void handleRoot() {
     // String(lastPercent, 1) → número con 1 decimal (ej: "65.3")
     "<div class='card'><div class='val'>" + String(lastPercent, 1) + " %</div>"
     "<div>Humedad del suelo</div></div>"
-    "<div class='card'>ADC Raw: <b>" + String(lastRaw) + "</b></div>"
-    "<div class='card'>Estado: <b>" + estado + "</b></div>"
-    "<div class='card'>Último riego: <b>" + ultimoRiego + "</b></div>"
+#if ENABLE_AMBIENT_SENSOR
+    "<div class='card'><div class='val'>" + (isnan(lastAmbientTempC) ? String("--") : String(lastAmbientTempC, 1)) + " C</div>"
+    "<div>Temperatura ambiental</div></div>"
+    "<div class='card'><div class='val'>" + (isnan(lastAmbientHumPct) ? String("--") : String(lastAmbientHumPct, 1)) + " %</div>"
+    "<div>Humedad ambiental</div></div>"
+#endif
     "<p><a href='/json'>Ver JSON</a></p>"
     "</body></html>";
 
@@ -442,6 +493,14 @@ void handleJson() {
   json += String(ON_THRESHOLD_PERCENT);
   json += ",\"relay_on_time_s\":";
   json += String((float)RELAY_ON_TIME_MS / 1000.0f, 1);
+#if ENABLE_AMBIENT_SENSOR
+  json += ",\"temperature\":";
+  if (isnan(lastAmbientTempC)) json += "null";
+  else json += String(lastAmbientTempC, 1);
+  json += ",\"humidity\":";
+  if (isnan(lastAmbientHumPct)) json += "null";
+  else json += String(lastAmbientHumPct, 1);
+#endif
   json += "}";
 
   if (json.indexOf("\"last_watered_sec\":") == -1) {
@@ -658,6 +717,14 @@ void publicarMQTT() {
   json += "\"last_watered_sec\":"     + String(secsAgo)                                + ",";
   json += "\"on_threshold_percent\":" + String(ON_THRESHOLD_PERCENT)                   + ",";
   json += "\"relay_on_time_s\":"      + String((float)RELAY_ON_TIME_MS / 1000.0f, 1);
+#if ENABLE_AMBIENT_SENSOR
+  if (!isnan(lastAmbientTempC)) {
+    json += ",\"temperature\":" + String(lastAmbientTempC, 1);
+  }
+  if (!isnan(lastAmbientHumPct)) {
+    json += ",\"humidity\":" + String(lastAmbientHumPct, 1);
+  }
+#endif
   json += "}";
 
   // mqtt.publish(topico, mensaje) retorna true si el mensaje fue encolado OK
@@ -693,6 +760,13 @@ void setup() {
   if (PIN_LED >= 0) {
     pinMode(PIN_LED, OUTPUT);  // LED integrado: salida digital
   }
+
+#if ENABLE_AMBIENT_SENSOR
+  pinMode(PIN_AMBIENT, INPUT_PULLUP);
+  ambientSensor.begin();
+  delay(2000);
+  Serial.printf("[AMBIENT] Sensor DHT iniciado en GPIO %d\n", PIN_AMBIENT);
+#endif
 
   // ── Estado seguro al arranque ─────────────────────────────────
   // Al arrancar siempre ponemos el relé inactivo para evitar que la
@@ -734,6 +808,21 @@ void setup() {
   lastPercent  = rawToPercent(lastRaw);
   lastSampleMs = millis();  // Registrar el instante de esta primera lectura
   Serial.printf("[ADC] Raw: %d | Humedad: %.1f%%\n", lastRaw, lastPercent);
+
+#if ENABLE_AMBIENT_SENSOR
+  float t0, h0;
+  bool okAmbient = readAmbient(t0, h0);
+  if (okAmbient) {
+    lastAmbientTempC = t0;
+    lastAmbientHumPct = h0;
+  }
+  lastAmbientSampleMs = millis();
+  if (!okAmbient) {
+    Serial.println("[AMBIENT] Lectura inicial no disponible.");
+  } else {
+    Serial.printf("[AMBIENT] Temp: %.1f C | Humedad: %.1f%%\n", lastAmbientTempC, lastAmbientHumPct);
+  }
+#endif
 
   // ── MQTT ──────────────────────────────────────────────────────
   // Solo configuramos MQTT si el usuario definió un servidor en config.h.
@@ -827,6 +916,22 @@ void loop() {
     // los almacene en la base de datos y los muestre en el dashboard.
     publicarMQTT();
   }
+
+#if ENABLE_AMBIENT_SENSOR
+  if (now - lastAmbientSampleMs >= AMBIENT_SAMPLE_MS) {
+    lastAmbientSampleMs = now;
+
+    float t, h;
+    bool okAmbient = readAmbient(t, h);
+    if (!okAmbient) {
+      Serial.println("[AMBIENT] Lectura invalida (NaN).");
+    } else {
+      lastAmbientTempC = t;
+      lastAmbientHumPct = h;
+      Serial.printf("[AMBIENT] Temp: %.1f C | Humedad: %.1f%%\n", t, h);
+    }
+  }
+#endif
 
   // ── 4. Control del relé y LED según el estado de humedad ──────
   // updateRelay() evalúa la máquina de estados con el porcentaje actual

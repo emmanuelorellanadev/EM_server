@@ -96,6 +96,10 @@ const raspberryTrendCharts = {
   humidity: null,
   pressure: null,
 };
+const esp32AmbientTrendCharts = {
+  temperature: null,
+  humidity: null,
+};
 const TREND_COLORS = {
   soil_humidity: '#2e7d32',
   on_threshold_percent: '#d32f2f',
@@ -122,19 +126,30 @@ function destroyAllTrendCharts() {
     destroyChartInstance(raspberryTrendCharts[field]);
     raspberryTrendCharts[field] = null;
   });
+  Object.keys(esp32AmbientTrendCharts).forEach(field => {
+    destroyChartInstance(esp32AmbientTrendCharts[field]);
+    esp32AmbientTrendCharts[field] = null;
+  });
 }
 
 function trendChartLayoutForSource(source) {
   const single = document.getElementById('trend-chart-single-wrapper');
   const multi = document.getElementById('trend-chart-rasp-wrapper');
-  if (!single || !multi) return;
+  const esp32 = document.getElementById('trend-chart-esp32-wrapper');
+  if (!single || !multi || !esp32) return;
 
   if (source === 'raspberrypi') {
     single.classList.add('hidden');
     multi.classList.remove('hidden');
+    esp32.classList.add('hidden');
+  } else if (source === 'esp32_01') {
+    single.classList.add('hidden');
+    multi.classList.add('hidden');
+    esp32.classList.remove('hidden');
   } else {
     multi.classList.add('hidden');
     single.classList.remove('hidden');
+    esp32.classList.add('hidden');
   }
 }
 
@@ -232,6 +247,35 @@ function initRaspberryTrendCharts(trendPayload) {
   });
 }
 
+function initEsp32AmbientTrendCharts(trendPayload) {
+  ['temperature', 'humidity'].forEach(field => {
+    const canvas = document.getElementById(`trend-chart-esp32-${field}`);
+    if (!canvas) return;
+
+    let datasets = [];
+    let yTitle = '';
+
+    if (field === 'humidity') {
+      // En la grafica de humedad ambiental tambien trazamos humedad de suelo.
+      datasets = [
+        buildDataset('humidity', trendPayload.datasets.humidity || []),
+        buildDataset('soil_humidity', trendPayload.datasets.soil_humidity || [], 1),
+      ];
+      yTitle = 'Humedad (%)';
+    } else {
+      const unit = FIELD_UNITS[field] || '';
+      yTitle = `${fieldLabel(field)}${unit ? ` (${unit})` : ''}`;
+      datasets = [buildDataset(field, trendPayload.datasets[field] || [])];
+    }
+
+    esp32AmbientTrendCharts[field] = new Chart(canvas, {
+      type: 'line',
+      data: { datasets },
+      options: buildTrendOptions(yTitle),
+    });
+  });
+}
+
 /**
  * Builds (or rebuilds) the irrigation trend chart.
  *
@@ -246,6 +290,11 @@ function initTrendChart(trendPayload) {
 
   if (source === 'raspberrypi') {
     initRaspberryTrendCharts(trendPayload);
+    return;
+  }
+
+  if (source === 'esp32_01') {
+    initEsp32AmbientTrendCharts(trendPayload);
     return;
   }
 
@@ -325,6 +374,30 @@ function updateCards(data) {
         }
       }
     });
+
+    const atmosphereCard = panel.querySelector('.card.atmosphere');
+    if (atmosphereCard) {
+      const snapshot = bySource[r.source] || {};
+      const temp = snapshot.temperature;
+      const hum = snapshot.humidity;
+
+      const tempEl = atmosphereCard.querySelector('.atmo-temp');
+      if (tempEl) {
+        tempEl.textContent = temp ? `${parseFloat(temp.value).toFixed(1)} °C` : '--';
+      }
+
+      const humEl = atmosphereCard.querySelector('.atmo-hum');
+      if (humEl) {
+        humEl.textContent = hum ? `${parseFloat(hum.value).toFixed(1)} %` : '--';
+      }
+
+      const timeEl = atmosphereCard.querySelector('.atmo-time');
+      if (timeEl) {
+        const tempTime = temp ? String(temp.recorded_at || '') : '';
+        const humTime = hum ? String(hum.recorded_at || '') : '';
+        timeEl.textContent = tempTime > humTime ? tempTime : humTime;
+      }
+    }
   });
 }
 
@@ -396,7 +469,7 @@ let trendSource = DEFAULT_TREND_SOURCE;
 const TREND_RANGE_SELECT_ID = 'trend-range';
 const TREND_TITLE_BY_SOURCE = {
   esp8266: 'Tendencia de Riego',
-  esp32_01: 'Tendencia de Riego',
+  esp32_01: 'Tendencia Ambiental',
   raspberrypi: 'Tendencia Ambiental',
 };
 

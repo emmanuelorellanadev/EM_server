@@ -81,7 +81,7 @@ ESP_PANEL_SOURCES = {"esp8266", "esp32_01"}
 DEFAULT_TREND_SOURCE = "esp8266"
 SOURCE_TREND_FIELDS: dict[str, tuple[str, ...]] = {
     "esp8266": ("soil_humidity", "on_threshold_percent"),
-    "esp32_01": ("soil_humidity", "on_threshold_percent"),
+    "esp32_01": ("soil_humidity", "on_threshold_percent", "temperature", "humidity"),
     "raspberrypi": ("temperature", "humidity", "pressure"),
 }
 DEFAULT_TREND_FIELDS = SOURCE_TREND_FIELDS[DEFAULT_TREND_SOURCE]

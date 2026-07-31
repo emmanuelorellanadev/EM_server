@@ -27,38 +27,38 @@ def db_path(tmp_path):
     return path
 
 
-def test_field_mapping_renames_percent_to_soil_humidity(db_path):
-    """ESP8266 'percent' should be stored as 'soil_humidity' after mapping."""
+def test_field_mapping_renames_soil_vwc_to_soil_humidity(db_path):
+    """ESP8266 'soil_vwc' should be stored as 'soil_humidity' after mapping."""
     import json
     payload = json.dumps({
-        "raw": 512, "percent": 42.3, "watering": False, "cooldown": False
+        "raw": 512, "soil_vwc": 42.3, "watering": False, "cooldown": False
     }).encode()
     userdata = _make_userdata(
         db_path,
-        {"esp8266": {"percent": "soil_humidity", "raw": "soil_raw"}}
+        {"esp8266": {"soil_vwc": "soil_humidity", "raw": "soil_raw"}}
     )
     _on_message(None, userdata, _FakeMsg("sensors/esp8266", payload))
 
     rows = database.get_readings_history(db_path, source="esp8266")
     fields = {r["field"] for r in rows}
-    assert "soil_humidity" in fields, "'percent' should be renamed to 'soil_humidity'"
+    assert "soil_humidity" in fields, "'soil_vwc' should be renamed to 'soil_humidity'"
     assert "soil_raw" in fields,      "'raw' should be renamed to 'soil_raw'"
-    assert "percent" not in fields
+    assert "soil_vwc" not in fields
     assert "raw" not in fields
 
 
 def test_field_mapping_applies_to_esp32_source(db_path):
     """ESP32 source uses its own mapping and is stored under esp32_01."""
     import json
-    payload = json.dumps({"percent": 55.7, "watering": True}).encode()
-    userdata = _make_userdata(db_path, {"esp32_01": {"percent": "soil_humidity"}})
+    payload = json.dumps({"soil_vwc": 55.7, "watering": True}).encode()
+    userdata = _make_userdata(db_path, {"esp32_01": {"soil_vwc": "soil_humidity"}})
 
     _on_message(None, userdata, _FakeMsg("sensors/esp32_01", payload))
 
     rows = database.get_readings_history(db_path, source="esp32_01")
     fields = {r["field"] for r in rows}
     assert "soil_humidity" in fields
-    assert "percent" not in fields
+    assert "soil_vwc" not in fields
 
 
 def test_no_mapping_stores_original_field_name(db_path):

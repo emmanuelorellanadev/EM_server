@@ -6,6 +6,7 @@ Integra dos fuentes de datos:
 | Dispositivo | Sensores | Protocolo |
 |---|---|---|
 | **ESP8266 NodeMCU V3** | Humedad de suelo (K8/C11), estado de riego | MQTT |
+| **ESP32** | Humedad de suelo (K8/C11), temperatura/humedad DHT, luz LDR, estado de riego | MQTT |
 | **Raspberry Pi + Sense HAT v1** | Temperatura, humedad ambiental, presión | MQTT (local) |
 
 ---
@@ -54,7 +55,7 @@ Integra dos fuentes de datos:
 │                                        ▼             │
 │                               ┌──────────────────┐   │
 │                               │  Flask Dashboard  │   │
-│                               │  app.py  :5000   │   │
+│                               │  app.py  :8080    │   │
 │                               └──────────────────┘   │
 └──────────────────────────────────────────────────────┘
 ```
@@ -138,17 +139,17 @@ Lectura del sensor
 rawToPercent()          ← convierte ADC crudo a %
       │
       ▼
-updateWatering()        ← decide si activar/detener el riego
+updateRelay()           ← decide estado del rele
       │
       ▼
-buildJson()             ← construye el payload MQTT
+publicarMQTT()          ← publica payload agregado
       │
       ▼
 mqtt.publish()          ─────────────────────────────────────────►
                                                                    │
                                                           mqtt_client.py
                                                                    │
-                                                          field_mapping()  ← "percent" → "soil_humidity"
+                                                          field mappings    ← normaliza campos por fuente
                                                                    │
                                                           insert_readings_from_payload()
                                                                    │
@@ -157,9 +158,12 @@ mqtt.publish()          ──────────────────�
                                                            Flask Dashboard
 ```
 
-#### Payload MQTT del ESP8266
+#### Payload MQTT del ESP8266 (histórico)
 
-El ESP8266 publica en `sensors/esp8266` cada 60 s (configurable):
+> **Nota:** El firmware del ESP8266 (`esp8266/humedadSueloK8/`) fue reemplazado por el firmware del ESP32 (`esp32/esp32.ino`).
+> Esta sección se conserva como referencia para quienes aún usen el ESP8266 original.
+
+El ESP publica en `sensors/<nodo>` en ventanas de agregacion (configurable):
 
 ```json
 {
@@ -177,6 +181,33 @@ El servidor aplica el mapeo configurado en `config.json`:
 - `raw` → se guarda como campo `soil_raw`
 - `watering` y `cooldown` (booleanos) → se guardan como `1.0` / `0.0`
 - `last_watered_sec` → se guarda y además se transforma a `last_watering_at_epoch` (timestamp UNIX; `-1` cuando no hay riego registrado) para mostrar la hora del último riego
+- `state` (cadena de texto) → se ignora en la base de datos
+
+#### Payload MQTT del ESP32
+
+El ESP32 publica en `sensors/<nodo>` con ventana de agregacion (configurable).
+A diferencia del ESP8266, incluye sensores ambiental (DHT) y de luz (LDR):
+
+```json
+{
+  "soil_vwc":              42.3,     ← humedad de suelo (mapeado a soil_humidity)
+  "watering":             false,    ← ¿esta el riego activo?
+  "state":                "WET",    ← "DRY" | "WET" | "WATERING" | "COOLDOWN"
+  "last_watered_sec":     120,      ← segundos desde el ultimo riego
+  "on_threshold_soil_vwc": 35,      ← umbral de activacion del riego
+  "relay_on_time_s":      5.0,       ← duracion del riego en segundos
+  "temperature":          25.3,     ← temperatura ambiental (DHT)
+  "humidity":             60.1,     ← humedad ambiental (DHT)
+  "light_raw":            2048,     ← valor ADC crudo del LDR (0-4095)
+  "light_percent":        50.0      ← luz ambiental convertida a porcentaje
+}
+```
+
+El servidor aplica el mapeo configurado en `config.json`:
+- `soil_vwc` → se guarda como campo `soil_humidity`
+- `temperature`, `humidity`, `light_raw`, `light_percent` → se guardan con su nombre original
+- `watering` (booleano) → se guarda como `1.0` / `0.0`
+- `last_watered_sec` → ademas se transforma a `last_watering_at_epoch`
 - `state` (cadena de texto) → se ignora en la base de datos
 
 #### Payload MQTT del Sense HAT
@@ -223,10 +254,10 @@ EM_server/
 ├── sense_hat_client.py      # Publicador de datos del Sense HAT → MQTT
 ├── app.py                   # Dashboard web Flask
 │
-├── esp8266/
-│   └── humedadSueloK8/
-│       ├── humedadSueloK8.ino   # Sketch Arduino completo
-│       └── config.example.h     # Plantilla de configuración
+├── esp32/
+│   ├── esp32.ino            # Sketch Arduino completo
+│   ├── config.example.h     # Plantilla de configuración
+│   └── CONFIGURACION.md     # Guía de configuración
 │
 ├── templates/
 │   ├── base.html            # Plantilla base
@@ -235,7 +266,7 @@ EM_server/
 │
 ├── static/
 │   ├── css/style.css        # Estilos del dashboard
-│   └── js/dashboard.js      # Gráficas (Chart.js) y auto-refresh
+│   └── js/dashboard.js      # Gráficas (Chart.js) y refresco manual
 │
 ├── systemd/
 │   ├── em-mqtt-client.service
@@ -302,33 +333,32 @@ python sense_hat_client.py --config config.json
 python app.py --config config.json
 ```
 
-Abre `http://<IP_de_la_Raspberry>:5000` en el navegador.
+Abre `http://<IP_de_la_Raspberry>:8080` en el navegador.
 
 ---
 
-## Configurar el ESP8266
+## Configurar el ESP32
 
 ```bash
 # 1. Copia la plantilla de configuración
-cp esp8266/humedadSueloK8/config.example.h \
-   esp8266/humedadSueloK8/config.h
+cp esp32/config.example.h \
+   esp32/config.h
 
 # 2. Edita config.h con tu red Wi-Fi, IP del broker y calibración
 
 # 3. En Arduino IDE:
-#    Herramientas → Placa → "NodeMCU 1.0 (ESP-12E Module)"
-#    Herramientas → Puerto → el COM/ttyUSB del ESP8266
-#    Instala "PubSubClient" de Nick O'Leary (Library Manager)
+#    Herramientas → Placa → "ESP32 Dev Module" o "NodeMCU-32S"
+#    Herramientas → Puerto → el COM/ttyUSB del ESP32
+#    Instala "PubSubClient" de Nick O'Leary y "DHT sensor library" de Adafruit
 #    Compila y sube
 ```
 
-El ESP8266 publicará automáticamente en `sensors/esp8266` cada 60 s
-(ajustable con `BACKGROUND_SAMPLE_MS` en `config.h`).
+El ESP publica telemetria agregada segun:
+- `AGGREGATION_SAMPLE_MS`
+- `MQTT_PUBLISH_INTERVAL_MS`
+- `MQTT_WINDOW_SAMPLE_COUNT`
 
-Además, desde esta versión:
-- publica su estado de presencia en `devices/esp8266/status` (`online`/`offline`, retain),
-- usa LWT para marcar `offline` en caídas inesperadas,
-- y envía una publicación inmediata al reconectar (no espera al siguiente intervalo).
+El nodo publica presencia en `devices/<nodo>/status` (`online`/`offline`) con LWT.
 
 ---
 
@@ -339,10 +369,18 @@ Además, desde esta versión:
 | `mqtt.broker` | Dirección del broker MQTT | `localhost` |
 | `mqtt.port` | Puerto del broker | `1883` |
 | `mqtt.username` / `password` | Credenciales (vacío = sin auth) | `""` |
+| `mqtt.client_id_subscriber` | Client ID del suscriptor MQTT | `em_server_subscriber` |
+| `mqtt.client_id_sensehat` | Client ID del publicador Sense HAT | `em_server_sensehat` |
+| `mqtt.topics.all` | Tópico wildcard de suscripción | `sensors/#` |
 | `mqtt.topics.device_status` | Tópico wildcard de presencia de dispositivos | `devices/+/status` |
 | `database.path` | Ruta del archivo SQLite | `em_server.db` |
-| `web.port` | Puerto del dashboard Flask | `5000` |
-| `sense_hat.publish_interval_seconds` | Intervalo del Sense HAT | `30` |
+| `web.host` | Interfaz de red del servidor Flask | `0.0.0.0` |
+| `web.port` | Puerto del dashboard Flask | `8080` |
+| `web.debug` | Modo debug de Flask | `false` |
+| `web.secret_key` | Clave secreta para sesiones Flask | `change-this-secret-key-in-production` |
+| `sense_hat.topic` | Tópico MQTT del Sense HAT | `sensors/raspberrypi` |
+| `sense_hat.publish_interval_seconds` | Intervalo de publicación del Sense HAT | `30` |
+| `sense_hat.cpu_temp_correction` | Corrección por calor de CPU (°C) | `5.0` |
 | `field_mappings` | Mapeo de nombres de campo por fuente | ver abajo |
 
 ### field_mappings
@@ -353,8 +391,14 @@ Permite renombrar campos del payload MQTT antes de guardarlos en la base de dato
 ```json
 "field_mappings": {
   "esp8266": {
-    "percent": "soil_humidity",
-    "raw":     "soil_raw"
+    "percent": "soil_humidity"
+  },
+  "esp32_01": {
+    "soil_vwc": "soil_humidity"
+  },
+  "esp32_02": {
+    "soil_vwc": "soil_humidity",
+    "percent": "soil_humidity"
   }
 }
 ```
@@ -368,6 +412,8 @@ Permite renombrar campos del payload MQTT antes de guardarlos en la base de dato
 | `GET /api/latest` | Última lectura de cada sensor |
 | `GET /api/history?source=&field=&limit=` | Historial filtrable |
 | `GET /api/sources` | Lista de fuentes activas |
+| `GET /api/trend?source=&range=` | Datos para grafica de tendencia (`1h`, `1d`, `1w`, `1m`, `1y`) |
+| `POST /api/command/water` | Envia comando de riego manual por MQTT |
 
 ---
 

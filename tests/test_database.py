@@ -107,7 +107,7 @@ def test_payload_esp8266_full(db_path):
     """Full ESP8266 payload matches expected fields."""
     payload = {
         "raw":      512,
-        "percent":  42.3,
+        "soil_vwc": 42.3,
         "state":    "MOIST",  # string – should be skipped
         "watering": False,
         "cooldown": False,
@@ -115,9 +115,9 @@ def test_payload_esp8266_full(db_path):
     insert_readings_from_payload(db_path, "esp8266", payload)
     rows = get_readings_history(db_path, source="esp8266")
     fields = {r["field"] for r in rows}
-    # state is a string → skipped; raw, percent, watering, cooldown stored
+    # state is a string → skipped; raw, soil_vwc, watering, cooldown stored
     assert "state" not in fields
-    assert {"raw", "percent", "watering", "cooldown"} == fields
+    assert {"raw", "soil_vwc", "watering", "cooldown"} == fields
 
 
 # ---------------------------------------------------------------------------

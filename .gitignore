@@ -15,12 +15,17 @@ build/
 *.sqlite3
 *.db-shm
 *.db-wal
+em_db/
+
+# Logs
+logs/
+*.log
 
 # Environment / secrets
 .env
 
-# ESP8266 local configuration (contains Wi-Fi credentials – never commit)
-esp8266/humedadSueloK8/config.h
+# ESP32 local configuration (contains Wi-Fi credentials – never commit)
+esp32/config.h
 
 # IDE
 .vscode/

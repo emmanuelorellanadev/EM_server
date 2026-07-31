@@ -1,9 +1,9 @@
-"""
-app.py – Flask web dashboard for EM_server.
+"""Flask dashboard and API for EM_server.
 
-Displays live and historical sensor readings received from the MQTT network
-and allows sending remote commands to IoT devices (e.g. start watering on
-the ESP8266) via a simple REST API that publishes to the MQTT broker.
+Responsibilities:
+- Render dashboard and history views.
+- Expose JSON endpoints for latest data and trend charts.
+- Publish manual watering commands to MQTT.
 
 Run:
     python app.py [--config config.json]
@@ -11,8 +11,6 @@ Run:
 
 import argparse
 import json
-import logging
-import os
 from datetime import datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -28,14 +26,10 @@ from database import (
     get_sources,
     init_db,
 )
+from logging_setup import setup_logging
 
-# Configure module-level logger so all log calls in this file are formatted
-# consistently and visible in the console / system journal.
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger("app")
+# Module logger for web/API process.
+logger = setup_logging("app")
 
 app = Flask(__name__)
 
@@ -44,53 +38,64 @@ app = Flask(__name__)
 # ---------------------------------------------------------------------------
 
 _FIELD_ICONS = {
-    "temperature":          "🌡️",
-    "humidity":             "💧",
+    "ambient_temperature":  "🌡️",
+    "ambient_humidity":     "💧",
     "soil_humidity":        "🌱",
     "online":               "📡",
     "light":                "☀️",
     "pressure":             "🌀",
     "watering":             "🚿",
-    "on_threshold_percent": "🎯",
-    "relay_on_time_s":      "⏱️",
+    "on_threshold_soil_vwc": "🎯",
+    "relay_on_time_s":       "⏱️",
 }
 _FIELD_LABELS = {
-    "temperature":          "Temperatura",
-    "humidity":             "Humedad Ambiental",
+    "ambient_temperature":  "Temperatura Ambiental",
+    "ambient_humidity":     "Humedad Ambiental",
     "soil_humidity":        "Humedad de Suelo",
     "online":               "Conectado MQTT",
-    "light":                "Iluminación",
+    "light":                "Luz Ambiental",
     "pressure":             "Presión Atmosférica",
     "watering":             "Riego Activo",
-    "on_threshold_percent": "Umbral de Activación (%)",
+    "on_threshold_soil_vwc": "Umbral de Activación (%)",
     "relay_on_time_s":      "Duración de Riego (s)",
 }
 
-# Fields that represent boolean on/off state (stored as 1.0 / 0.0)
+# Fields stored as boolean state (1.0 / 0.0 in DB).
 BOOLEAN_FIELDS = {"watering", "online"}
-HIDDEN_FIELDS = {"last_watered_sec", "last_watering_at_epoch", "relay_on_time_s"}
+HIDDEN_FIELDS = {"last_watered_sec", "last_watering_at_epoch", "relay_on_time_s", "light_raw"}
 DISPLAY_TZ = ZoneInfo("America/Guatemala")
-NO_LAST_WATERING_TEXT = "Ultimo riego: sin registro"
-NO_RELAY_DURATION_TEXT = "Duracion de riego: sin dato"
-NO_THRESHOLD_TEXT = "Umbral de activacion: sin dato"
+NO_LAST_WATERING_TEXT = "sin registro"
+NO_RELAY_DURATION_TEXT = "sin dato"
+NO_THRESHOLD_TEXT = "sin dato"
 LAST_WATERED_SEC_FIELD = "last_watered_sec"
 LAST_WATERING_EPOCH_FIELD = "last_watering_at_epoch"
 RELAY_ON_TIME_FIELD = "relay_on_time_s"
-ON_THRESHOLD_FIELD = "on_threshold_percent"
-ESP_PANEL_SOURCES = {"esp8266", "esp32_01"}
+ON_THRESHOLD_FIELD = "on_threshold_soil_vwc"
+# Sources that should render the ESP-oriented dashboard panel
+# (soil humidity, atmosphere card, watering command, etc.).
+ESP_PANEL_SOURCES = {"esp8266", "esp32_01", "esp32_02"}
 DEFAULT_TREND_SOURCE = "esp8266"
+
+# Keep a shared tuple for ESP32 ambient-capable nodes so adding a new ESP32
+# only requires one explicit source entry below.
+ESP32_AMBIENT_TREND_FIELDS = (
+    "soil_humidity",
+    "on_threshold_soil_vwc",
+    "ambient_temperature",
+    "ambient_humidity",
+    "light",
+)
+
 SOURCE_TREND_FIELDS: dict[str, tuple[str, ...]] = {
-    "esp8266": ("soil_humidity", "on_threshold_percent"),
-    "esp32_01": ("soil_humidity", "on_threshold_percent", "temperature", "humidity"),
+    "esp8266": ("soil_humidity", "on_threshold_soil_vwc"),
+    "esp32_01": ESP32_AMBIENT_TREND_FIELDS,
+    "esp32_02": ESP32_AMBIENT_TREND_FIELDS,
     "raspberrypi": ("temperature", "humidity", "pressure"),
 }
 DEFAULT_TREND_FIELDS = SOURCE_TREND_FIELDS[DEFAULT_TREND_SOURCE]
 
-# Trend ranges requested for the irrigation chart selector.
-#
-# Keys are API values used by the frontend dropdown.
-# Labels are display-friendly text shown/returned to the client.
-# bucket_seconds keeps the chart readable on long ranges.
+# Trend range options used by /api/trend.
+# bucket_seconds applies downsampling on long ranges.
 TREND_RANGE_CONFIG: dict[str, dict] = {
     "1h": {
         "label": "Ultima hora",
@@ -145,7 +150,7 @@ def is_esp_panel_source(source: str) -> bool:
     return source in ESP_PANEL_SOURCES
 
 
-def format_last_watering(epoch_value) -> str:
+def format_last_watering(epoch_value: float) -> str:
     """Build a user-friendly label for the latest watering timestamp."""
     try:
         epoch = float(epoch_value)
@@ -156,10 +161,10 @@ def format_last_watering(epoch_value) -> str:
         return NO_LAST_WATERING_TEXT
 
     dt = datetime.fromtimestamp(epoch, DISPLAY_TZ)
-    return f"Ultimo riego: {dt.strftime('%d/%m/%Y %H:%M:%S')}"
+    return dt.strftime('%d/%m/%Y %H:%M:%S')
 
 
-def _recorded_at_to_epoch(recorded_at_value) -> Optional[float]:
+def _recorded_at_to_epoch(recorded_at_value: str) -> Optional[float]:
     """Parse an ISO timestamp from DB and return epoch seconds."""
     if not recorded_at_value:
         return None
@@ -174,7 +179,7 @@ def _recorded_at_to_epoch(recorded_at_value) -> Optional[float]:
     return dt.timestamp()
 
 
-def format_relay_duration(seconds_value) -> str:
+def format_relay_duration(seconds_value: float) -> str:
     """Build a user-friendly label for relay-on duration in seconds."""
     try:
         seconds = float(seconds_value)
@@ -185,32 +190,31 @@ def format_relay_duration(seconds_value) -> str:
         return NO_RELAY_DURATION_TEXT
 
     if seconds.is_integer():
-        return f"Duracion de riego: {int(seconds)} s"
+        return f"{int(seconds)} s"
 
-    return f"Duracion de riego: {seconds:.1f} s"
+    return f"{seconds:.1f} s"
 
 
-def format_threshold(percent_value) -> str:
-    """Build a user-friendly label for watering threshold percentage."""
+def format_threshold(threshold_value: float) -> str:
+    """Build a user-friendly label for watering threshold."""
     try:
-        percent = float(percent_value)
+        threshold = float(threshold_value)
     except (TypeError, ValueError):
         return NO_THRESHOLD_TEXT
 
-    if percent < 0:
+    if threshold < 0:
         return NO_THRESHOLD_TEXT
 
-    if percent.is_integer():
-        return f"Umbral de activacion: {int(percent)} %"
+    if threshold.is_integer():
+        return f"{int(threshold)} %"
 
-    return f"Umbral de activacion: {percent:.1f} %"
+    return f"{threshold:.1f} %"
 
 
 def build_latest_by_source(latest_readings: list[dict]) -> dict[str, dict[str, dict]]:
     """Index latest readings as ``source -> field -> row``.
 
-    This avoids scanning the same list multiple times from templates and keeps
-    card rendering deterministic.
+    Avoids repeated scans from templates.
     """
     by_source: dict[str, dict[str, dict]] = {}
     for reading in latest_readings:
@@ -239,9 +243,9 @@ def build_last_watering_epoch_by_source(
     """Resolve one epoch timestamp per source for "ultimo riego".
 
     Resolution order:
-    1) latest ``last_watering_at_epoch`` if valid.
-    2) derive from latest ``last_watered_sec`` + its ``recorded_at``.
-    3) DB fallback when ESP sends sentinel ``last_watered_sec = -1``.
+    1) latest ``last_watering_at_epoch``.
+    2) derive from ``last_watered_sec`` + ``recorded_at``.
+    3) DB fallback when ESP reports ``last_watered_sec = -1``.
     """
     by_source: dict[str, float] = {}
 
@@ -306,15 +310,9 @@ def build_threshold_by_source(
 def _decorate_history_rows(readings: list[dict]) -> list[dict]:
     """Add UI-friendly display fields for history rows.
 
-    Why this exists:
-    - ``last_watered_sec = -1`` is a sentinel from ESP8266 after reboot.
-    - End users need to see the latest known "ultimo riego" date instead of
-      repeated ``-1`` values.
-
-    This function keeps raw DB data intact and only enriches rows for the
-    history template.
+    Keeps raw DB rows unchanged and adds display fields for templates.
     """
-    # We only need DB fallback for sources that contain the sentinel field.
+    # DB fallback is needed only for sources that report last_watered_sec.
     sources_needing_fallback = {
         row.get("source")
         for row in readings
@@ -330,7 +328,7 @@ def _decorate_history_rows(readings: list[dict]) -> list[dict]:
 
     decorated: list[dict] = []
     for row in readings:
-        # Copy row so we never mutate the original DB payload in-place.
+        # Copy to avoid mutating DB row data in-place.
         current = dict(row)
         current["display_field"] = row.get("field", "")
         current["display_value"] = None
@@ -433,20 +431,17 @@ def _bucket_trend_points(rows: list[dict], bucket_seconds: int) -> list[dict]:
 def _build_trend_response(source: str, range_key: str) -> dict:
     """Build trend payload for one source and one selected range.
 
-    This function is intentionally straightforward so it is easy to teach and
-    maintain. Supported fields are resolved by source in SOURCE_TREND_FIELDS.
+    Supported fields are selected by source via SOURCE_TREND_FIELDS.
     """
     cfg = TREND_RANGE_CONFIG[range_key]
+    source = (source or "").strip().lower()
     now = datetime.now(DISPLAY_TZ)
     since = now - cfg["delta"]
     trend_fields = SOURCE_TREND_FIELDS.get(source, DEFAULT_TREND_FIELDS)
 
     datasets: dict[str, list[dict]] = {}
     for field in trend_fields:
-        # Backward-compatible access:
-        # if get_field_history() exists in database.py we use it.
-        # If not (for example, stale deployment files), we gracefully
-        # fallback to get_readings_history() and filter in Python.
+        # Backward compatibility for older database.py deployments.
         if hasattr(database_module, "get_field_history"):
             rows = database_module.get_field_history(
                 _db_path,
@@ -456,8 +451,7 @@ def _build_trend_response(source: str, range_key: str) -> dict:
                 limit=None,
             )
         else:
-            # Fallback path for older database.py versions.
-            # We fetch enough rows, then apply time filtering and ordering.
+            # Fallback path: fetch recent history and filter in Python.
             fallback_rows = get_readings_history(
                 _db_path,
                 source=source,
@@ -483,7 +477,7 @@ def _build_trend_response(source: str, range_key: str) -> dict:
     }
 
 _config: dict = {}
-_db_path: str = "em_server.db"
+_db_path: str = "em_db/em_server.db"
 
 
 # ---------------------------------------------------------------------------
@@ -567,10 +561,10 @@ def api_trend():
           "source": "esp8266",
           "range": "1d",
           "range_label": "Ultimo dia",
-          "fields": ["soil_humidity", "on_threshold_percent"],
+          "fields": ["soil_humidity", "on_threshold_soil_vwc"],
           "datasets": {
             "soil_humidity": [{"x": "...", "y": 45.2}],
-            "on_threshold_percent": [{"x": "...", "y": 25.0}]
+            "on_threshold_soil_vwc": [{"x": "...", "y": 25.0}]
           }
         }
     """
@@ -587,18 +581,14 @@ def api_trend():
 
 
 # ---------------------------------------------------------------------------
-# Command API routes — publish MQTT commands to IoT devices
+# Command API routes
 # ---------------------------------------------------------------------------
 
 
 def _mqtt_publish_command(mqtt_cfg: dict, topic: str, payload: dict) -> None:
     """Publish a single MQTT command message and disconnect immediately.
 
-    Uses paho.mqtt.publish.single() which establishes a temporary connection,
-    publishes the message with QoS 1 (at-least-once delivery), and closes the
-    connection. This is ideal for infrequent, one-shot commands from the web
-    dashboard without keeping a persistent MQTT connection inside the Flask
-    process.
+    Uses paho.mqtt.publish.single() for one-shot command publishing.
 
     Args:
         mqtt_cfg: The ``mqtt`` block from config.json.
@@ -618,7 +608,7 @@ def _mqtt_publish_command(mqtt_cfg: dict, topic: str, payload: dict) -> None:
     mqtt_publish.single(
         topic,
         payload=json.dumps(payload),
-        qos=1,               # at-least-once delivery
+        qos=1,
         hostname=mqtt_cfg["broker"],
         port=mqtt_cfg["port"],
         auth=auth,
@@ -629,7 +619,8 @@ def _mqtt_publish_command(mqtt_cfg: dict, topic: str, payload: dict) -> None:
 def api_command_water():
     """Send a manual watering command to an ESP device via MQTT.
 
-    The target source can be passed in the JSON body as ``{"source": "esp32_01"}``.
+    The target source can be passed in the JSON body as
+    ``{"source": "esp32_01"}`` or ``{"source": "esp32_02"}``.
     If omitted, defaults to ``esp8266`` for backward compatibility.
     """
     mqtt_cfg = _config.get("mqtt")
@@ -651,12 +642,11 @@ def api_command_water():
 
     try:
         _mqtt_publish_command(mqtt_cfg, topic, {"action": "water"})
+        logger.info("Water command published to %s (source=%s)", topic, source)
         return jsonify({"ok": True, "topic": topic, "source": source})
     except Exception as exc:
-        # Log the full error server-side but do not expose internal details
-        # (stack traces, hostnames, …) to the API caller to avoid information
-        # leakage (CWE-209 / CodeQL py/stack-trace-exposure).
-        logger.error("Failed to publish watering command: %s", exc)
+        # Log internal error details server-side only.
+        logger.error("Failed to publish watering command to %s: %s", topic, exc)
         return jsonify({"error": "No se pudo enviar el comando al broker MQTT"}), 502
 
 
@@ -685,6 +675,11 @@ if __name__ == "__main__":
 
     web_cfg = _config["web"]
     app.secret_key = web_cfg["secret_key"]
+
+    DISPLAY_TZ = ZoneInfo(web_cfg.get("display_timezone", "America/Guatemala"))
+    ESP_PANEL_SOURCES = set(web_cfg.get("esp_panel_sources", ["esp8266", "esp32_01", "esp32_02"]))
+    DEFAULT_TREND_SOURCE = web_cfg.get("default_trend_source", "esp8266")
+
     app.run(
         host=web_cfg["host"],
         port=web_cfg["port"],

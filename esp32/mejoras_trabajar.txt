@@ -1,0 +1,57 @@
+# ⚙️ Documento de Mejoras Arquitectónicas para el Firmware ESP32 (mejoras_trabajar.txt)
+
+Este documento consolida recomendaciones críticas para mejorar la escalabilidad, robustez y fiabilidad del sistema embebido, abordando la gestión multi-nodo y la calidad estadística de los datos.
+
+## 🌐 I. Gestión Centralizada de Múltiples Nodos (Escalabilidad)
+
+El desafío actual es el *hardcoding* de IDs y tópicos. Para escalar a múltiples nodos sin tocar el código fuente del servidor o del firmware para cada dispositivo, se requiere un **Registro Global de Dispositivos**.
+
+### 🛠️ Arquitectura Propuesta: Registro de Nodos (Device Registry)
+
+1.  **Fuente Única de Verdad (`config.json` en Servidor):**
+    *   Se debe modificar el `config.json` para incluir una sección dedicada a la gestión de dispositivos, mapeando un ID único físico (ej., `esp32_02`) con sus parámetros MQTT asociados.
+
+    ```json
+    "devices": {
+        "esp32_01": {"enabled": true, "mqtt_topic_prefix": "sensors/esp32_01", "command_topic": "commands/esp32_01"},
+        "esp32_02": {"enabled": true, "mqtt_topic_prefix": "sensors/esp32_02", "command_topic": "commands/esp32_02"}
+    }
+    ```
+
+2.  **Cliente (Firmware ESP32):**
+    *   El firmware no debe usar constantes fijas en `config.h`. El ID del dispositivo debería ser leído desde una fuente única y confiable (ej., EEPROM interna).
+    *   La lógica de generación de tópicos debe construirse en tiempo de ejecución usando este ID único.
+
+3.  **Impacto en la Lógica:**
+    *   En lugar de funciones específicas, se crea una función genérica que use el `device_id` para construir cualquier tópico MQTT (`get_mqtt_topic(device_id, topic_type)`).
+
+**Beneficio:** La adición de un nuevo dispositivo es ahora una tarea de configuración (actualizar JSON) y no requiere modificar ni recompilar código fuente.
+
+---
+
+## 📊 II. Detección de Anomalías mediante Desviación Estándar ($\sigma$)
+
+El promedio solo mide la tendencia central, pero falla ante datos erráticos o fallos transitorios del sensor. La desviación estándar permite validar si una lectura es *estadísticamente* plausible.
+
+### 🔬 Principio Estadístico: Puntuación Z (Z-Score)
+
+La puntuación $Z$ mide cuántas desviaciones estándar ($Z$) está un punto de datos actual respecto a la media histórica ($\mu$).
+
+$$Z = \frac{|x_{\text{actual}} - \mu|}{\sigma}$$
+
+**Implementación Propuesta (En el Servidor):**
+
+1.  **Recolección:** Obtener $N$ muestras históricas ($N \ge 30$) de `get_field_history`.
+2.  **Cálculo:** Calcular $\mu$, la Varianza ($\sigma^2$), y finalmente $\sigma$.
+3.  **Validación:** Si $|Z| > \text{Umbral (Ej: 2.5)}$, se marca como **Anomalía Estadística**. Esta lectura no debe ser usada para promedios en tiempo real, alertando al usuario sobre un posible fallo de sensor o red antes de que cause confusión en la interfaz.
+
+**Beneficio:** Aumenta la fiabilidad y permite diferenciar entre un cambio ambiental legítimo y una falla momentánea del equipo.
+
+---
+
+## ⚡ III. Resumen Operacional Adicional: Modo Sueño (Energy Efficiency)
+
+*   **Tarea Crítica:** Implementar el *Deep Sleep*.
+*   **Flujo:** El microcontrolador debe suspender la mayor parte de su consumo energético en modo sueño, despertando solo cíclicamente para realizar mediciones y transmitir datos. Esto es fundamental para cualquier despliegue basado en batería o energía solar, extendiendo la vida operativa a meses.
+
+***

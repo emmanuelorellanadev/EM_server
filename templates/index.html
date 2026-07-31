@@ -25,82 +25,129 @@
           <div class="cards-grid">
             {% if is_esp_panel_source(src) %}
               {#
-                ESP8266 usa un layout intencional para evitar duplicados:
+                Los paneles ESP usan un layout fijo en lugar de
+                recorrer latest genericamente, para controlar el
+                orden y evitar duplicados:
                 1) Humedad de suelo
-                2) Riego Activo (estado + metadatos de riego)
-                3) Conectado MQTT
+                2) Atmosfera (temperatura + humedad ambiental)
+                3) Luz ambiental
+                4) Riego Activo (estado + metadatos de riego)
+                5) Conectado MQTT
               #}
-              {% set esp_order = ['soil_humidity', 'atmosphere', 'watering', 'online'] %}
+              {% set esp_order = ['soil_humidity', 'atmosphere', 'online'] %}
               {% for field in esp_order %}
                 {% if field == 'atmosphere' %}
-                  {% set temp_reading = source_fields.get('temperature') %}
-                  {% set hum_reading = source_fields.get('humidity') %}
-                  {% if temp_reading or hum_reading %}
-                    {% set temp_time = temp_reading.recorded_at if temp_reading else '' %}
-                    {% set hum_time = hum_reading.recorded_at if hum_reading else '' %}
-                    {% set atmo_time = temp_time if temp_time > hum_time else hum_time %}
-                    <div class="card atmosphere">
-                      <div class="card-icon">🌤️</div>
-                      <div class="card-body">
-                        <span class="card-label">Atmósfera</span>
-                        <div class="atmo-line">
-                          <span class="atmo-label">Temperatura ambiental</span>
-                          <span class="atmo-value atmo-temp">
+                  {% set temp_reading = source_fields.get('ambient_temperature') %}
+                  {% set hum_reading = source_fields.get('ambient_humidity') %}
+                  {% set light_reading = source_fields.get('light') %}
+                  {% set temp_time = temp_reading.recorded_at if temp_reading else '' %}
+                  {% set hum_time = hum_reading.recorded_at if hum_reading else '' %}
+                  {% set light_time = light_reading.recorded_at if light_reading else '' %}
+                  {% set atmo_time = [temp_time, hum_time, light_time]|max %}
+                  <div class="card atmosphere">
+                    <div class="card-icon">🌤️</div>
+                    <div class="card-body">
+                      <span class="card-title">ATMÓSFERA</span>
+                      <div class="soil-info-grid">
+                        <div class="soil-info-row">
+                          <span class="soil-info-label">🌡️ Temperatura</span>
+                          <span class="soil-info-value atmo-temp">
                             {% if temp_reading %}{{ "%.1f"|format(temp_reading.value) }} °C{% else %}--{% endif %}
                           </span>
                         </div>
-                        <div class="atmo-line">
-                          <span class="atmo-label">Humedad ambiental</span>
-                          <span class="atmo-value atmo-hum">
+                        <div class="soil-info-row">
+                          <span class="soil-info-label">💧 Humedad</span>
+                          <span class="soil-info-value atmo-hum">
                             {% if hum_reading %}{{ "%.1f"|format(hum_reading.value) }} %{% else %}--{% endif %}
                           </span>
                         </div>
-                        <span class="card-time atmo-time">{{ atmo_time }}</span>
+                        <div class="soil-info-row">
+                          <span class="soil-info-label">☀️ Luz</span>
+                          <span class="soil-info-value atmo-light">
+                            {% if light_reading %}{{ "%.1f"|format(light_reading.value) }} %{% else %}--{% endif %}
+                          </span>
+                        </div>
                       </div>
+                      <span class="card-time atmo-time">{{ atmo_time if atmo_time else '--' }}</span>
                     </div>
-                  {% endif %}
-                {% else %}
-                  {% set reading = source_fields.get(field) %}
-                  {% if reading %}
-                    <div class="card {{ reading.field }}">
-                      <div class="card-icon">{{ field_icon(reading.field) }}</div>
-                      <div class="card-body">
-                        <span class="card-label">{{ field_label(reading.field) }}</span>
-                        {% if is_boolean_field(reading.field) %}
-                          <span class="card-value status-badge {% if reading.value %}status-on{% else %}status-off{% endif %}">
-                            {% if reading.value %}Activo{% else %}Inactivo{% endif %}
+                  </div>
+                {% elif field == 'soil_humidity' %}
+                  {% set soil_reading = source_fields.get('soil_humidity') or source_fields.get('percent') or source_fields.get('soil_vwc') %}
+                  {% set watering_reading = source_fields.get('watering') %}
+                  <div class="card soil_humidity">
+                    <div class="card-icon">{{ field_icon('soil_humidity') }}</div>
+                    <div class="card-body">
+                      <span class="card-title">SUELO</span>
+                      <div class="soil-info-grid">
+                        <div class="soil-info-row">
+                          <span class="soil-info-label">🌱 Humedad</span>
+                          <span class="soil-info-value soil-humidity-value">
+                            {% if soil_reading %}{{ "%.1f"|format(soil_reading.value) }} %{% else %}--{% endif %}
                           </span>
-                        {% else %}
-                          <span class="card-value">
-                            {{ "%.1f"|format(reading.value) }}
-                            <small>{{ reading.unit }}</small>
+                        </div>
+                        <div class="soil-info-row">
+                          <span class="soil-info-label">🚿 Riego</span>
+                          <span class="soil-watering-value status-badge {% if watering_reading and watering_reading.value %}status-on{% else %}status-off{% endif %}">
+                            {% if watering_reading and watering_reading.value %}Activo{% else %}Inactivo{% endif %}
                           </span>
-                        {% endif %}
-                        <span class="card-time">{{ reading.recorded_at }}</span>
-
-                        {% if reading.field == 'watering' %}
-                          <span class="card-extra watering-duration" data-source="{{ src }}">
-                            {{ relay_duration_by_source.get(src, "Duracion de riego: sin dato") }}
+                        </div>
+                        <div class="soil-info-row">
+                          <span class="soil-info-label">⏱️ Duración</span>
+                          <span class="soil-info-value watering-duration" data-source="{{ src }}">
+                            {{ relay_duration_by_source.get(src, "sin dato") }}
                           </span>
-                          <span class="card-extra watering-threshold" data-source="{{ src }}">
-                            {{ threshold_by_source.get(src, "Umbral de activacion: sin dato") }}
+                        </div>
+                        <div class="soil-info-row">
+                          <span class="soil-info-label">🎯 Umbral</span>
+                          <span class="soil-info-value watering-threshold" data-source="{{ src }}">
+                            {{ threshold_by_source.get(src, "sin dato") }}
                           </span>
+                        </div>
+                        <div class="soil-info-row">
+                          <span class="soil-info-label">🕒 Último riego</span>
                           <span
-                            class="card-extra last-watering-time"
+                            class="soil-info-value last-watering-time"
                             data-source="{{ src }}"
                             data-last-watering-epoch="{{ ('%.6f'|format(last_watering_epoch_by_source[src])) if src in last_watering_epoch_by_source else '' }}"
                           >
-                            {{ last_watering_by_source.get(src, "Ultimo riego: sin registro") }}
+                            {{ last_watering_by_source.get(src, "sin registro") }}
                           </span>
-                        {% endif %}
+                        </div>
                       </div>
+                      <button class="cmd-btn" onclick="sendWaterCommand(this, '{{ src }}')">
+                        💧 Activar Riego Manual
+                      </button>
+                      <span class="cmd-status" id="water-cmd-status-{{ src }}"></span>
+                      {% if soil_reading %}
+                        <span class="card-time soil-time">{{ soil_reading.recorded_at }}</span>
+                      {% else %}
+                        <span class="card-time soil-time">--</span>
+                      {% endif %}
                     </div>
-                  {% endif %}
+                  </div>
+                {% elif field == 'online' %}
+                  {% set reading = source_fields.get('online') %}
+                  <div class="card online">
+                    <div class="card-icon">{{ field_icon('online') }}</div>
+                    <div class="card-body">
+                      <span class="card-title">SATÉLITE</span>
+                      <div class="soil-info-grid">
+                        <div class="soil-info-row">
+                          <span class="soil-info-label">📡 Estado</span>
+                          <span class="soil-info-value online-status-value status-badge {% if reading and reading.value %}status-on{% else %}status-off{% endif %}">
+                            {% if reading and reading.value %}Conectado{% else %}Desconectado{% endif %}
+                          </span>
+                        </div>
+                      </div>
+                      {% if reading %}
+                        <span class="card-time online-time">{{ reading.recorded_at }}</span>
+                      {% else %}
+                        <span class="card-time online-time">--</span>
+                      {% endif %}
+                    </div>
+                  </div>
                 {% endif %}
               {% endfor %}
-              {% if not source_fields.get('soil_humidity') and not source_fields.get('temperature') and not source_fields.get('humidity') and not source_fields.get('watering') and not source_fields.get('online') %}
-                <p class="no-data">Sin datos aún para {{ src }}.</p>
-              {% endif %}
             {% else %}
               {% for reading in latest if reading.source == src and should_render_field(reading.field) %}
                 <div class="card {{ reading.field }}">
@@ -125,20 +172,6 @@
               {% endfor %}
             {% endif %}
           </div>
-
-              {# Botón de riego manual — solo visible para paneles ESP #}
-          {% if is_esp_panel_source(src) %}
-          <div class="command-panel">
-            <button class="cmd-btn" onclick="sendWaterCommand(this, '{{ src }}')">
-              💧 Activar Riego Manual
-            </button>
-            <span class="cmd-status" id="water-cmd-status-{{ src }}"></span>
-            <p class="cmd-hint">
-              Envía una instrucción MQTT al invernadero para activar el riego
-              por el tiempo configurado en {{ src }} (RELAY_ON_TIME_MS en config.h).
-            </p>
-          </div>
-          {% endif %}
 
         </div>
       {% endfor %}
@@ -172,11 +205,11 @@
     <div class="charts-grid-rasp">
       <div class="chart-card">
         <h3>Temperatura</h3>
-        <canvas id="trend-chart-temperature" height="140"></canvas>
+        <canvas id="trend-chart-ambient_temperature" height="140"></canvas>
       </div>
       <div class="chart-card">
         <h3>Humedad</h3>
-        <canvas id="trend-chart-humidity" height="140"></canvas>
+        <canvas id="trend-chart-ambient_humidity" height="140"></canvas>
       </div>
       <div class="chart-card">
         <h3>Presión</h3>
@@ -188,11 +221,15 @@
     <div class="charts-grid-esp32">
       <div class="chart-card">
         <h3>Temperatura ambiental</h3>
-        <canvas id="trend-chart-esp32-temperature" height="140"></canvas>
+        <canvas id="trend-chart-esp32-ambient_temperature" height="140"></canvas>
       </div>
       <div class="chart-card">
         <h3>Humedad ambiental</h3>
-        <canvas id="trend-chart-esp32-humidity" height="140"></canvas>
+        <canvas id="trend-chart-esp32-ambient_humidity" height="140"></canvas>
+      </div>
+      <div class="chart-card">
+        <h3>Luz ambiental</h3>
+        <canvas id="trend-chart-esp32-light" height="140"></canvas>
       </div>
     </div>
   </div>

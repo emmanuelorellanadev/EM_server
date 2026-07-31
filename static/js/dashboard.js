@@ -1,28 +1,26 @@
-/* dashboard.js – client-side helpers for the EM Server dashboard */
+/* Client logic for dashboard cards, commands, and trend charts. */
 
 'use strict';
 
-// ------------------------------------------------------------------ //
-// Field metadata
-// ------------------------------------------------------------------ //
+// Field metadata used in cards and chart labels.
 const FIELD_META = {
-  temperature:          { label: 'Temperatura',              icon: '🌡️'  },
-  humidity:             { label: 'Humedad Ambiental',         icon: '💧'  },
+  ambient_temperature:  { label: 'Temperatura Ambiental',     icon: '🌡️'  },
+  ambient_humidity:     { label: 'Humedad Ambiental',         icon: '💧'  },
   soil_humidity:        { label: 'Humedad de Suelo',          icon: '🌱'  },
   online:               { label: 'Conectado MQTT',            icon: '📡'  },
-  light:                { label: 'Iluminación',               icon: '☀️'  },
+  light:                { label: 'Luz Ambiental',             icon: '☀️'  },
   pressure:             { label: 'Presión Atmosférica',       icon: '🌀'  },
   watering:             { label: 'Riego Activo',              icon: '🚿'  },
-  on_threshold_percent: { label: 'Umbral de Activación (%)', icon: '🎯'  },
+  on_threshold_soil_vwc: { label: 'Umbral de Activación (%)', icon: '🎯'  },
   relay_on_time_s:      { label: 'Duración de Riego (s)',    icon: '⏱️'  },
 };
 
-// Fields rendered as on/off rather than a number
+// Fields rendered as boolean badges.
 const BOOLEAN_FIELDS = new Set(['watering', 'online']);
 const LAST_WATERING_FIELD = 'last_watering_at_epoch';
 const LAST_WATERED_SEC_FIELD = 'last_watered_sec';
 const RELAY_ON_TIME_FIELD = 'relay_on_time_s';
-const ON_THRESHOLD_FIELD = 'on_threshold_percent';
+const ON_THRESHOLD_FIELD = 'on_threshold_soil_vwc';
 
 function fieldLabel(field) {
   return (FIELD_META[field] || {}).label || field;
@@ -33,19 +31,19 @@ function fieldIcon(field) {
 }
 
 /**
- * Formats "ultimo riego" from unix epoch seconds.
+ * Format last watering timestamp from epoch seconds.
+ * @param {number} epochSeconds - Unix timestamp in seconds.
+ * @returns {string} Formatted datetime string or "sin registro".
  */
 function formatLastWatering(epochSeconds) {
   if (!Number.isFinite(epochSeconds) || epochSeconds <= 0) {
-    return 'Ultimo riego: sin registro';
+    return 'sin registro';
   }
   const dt = new Date(epochSeconds * 1000);
-  return `Ultimo riego: ${dt.toLocaleString('es-GT', { hour12: false, timeZone: 'America/Guatemala' })}`;
+  return dt.toLocaleString('es-GT', { hour12: false, timeZone: 'America/Guatemala' });
 }
 
-/**
- * Reads persisted epoch from a card (server-rendered bootstrap value).
- */
+// Read persisted epoch rendered by server for fallback display.
 function readPersistedEpoch(card) {
   const node = card.querySelector('.last-watering-time');
   if (!node) return Number.NaN;
@@ -55,9 +53,7 @@ function readPersistedEpoch(card) {
   return Number.NaN;
 }
 
-/**
- * Converts API recorded_at ISO string to epoch seconds.
- */
+// Convert recorded_at ISO text to epoch seconds.
 function recordedAtToEpochSeconds(recordedAt) {
   if (!recordedAt) return Number.NaN;
   const ms = Date.parse(recordedAt);
@@ -65,31 +61,39 @@ function recordedAtToEpochSeconds(recordedAt) {
   return ms / 1000;
 }
 
+/**
+ * Format relay duration for display.
+ * @param {number} secondsValue - Duration in seconds.
+ * @returns {string} Formatted duration string or "sin dato".
+ */
 function formatRelayDuration(secondsValue) {
   const seconds = Number(secondsValue);
   if (!Number.isFinite(seconds) || seconds < 0) {
-    return 'Duracion de riego: sin dato';
+    return 'sin dato';
   }
   if (Number.isInteger(seconds)) {
-    return `Duracion de riego: ${seconds} s`;
+    return `${seconds} s`;
   }
-  return `Duracion de riego: ${seconds.toFixed(1)} s`;
+  return `${seconds.toFixed(1)} s`;
 }
 
+/**
+ * Format watering threshold percentage for display.
+ * @param {number} value - Threshold percentage.
+ * @returns {string} Formatted threshold string or "sin dato".
+ */
 function formatThreshold(value) {
   const threshold = Number(value);
   if (!Number.isFinite(threshold) || threshold < 0) {
-    return 'Umbral de activacion: sin dato';
+    return 'sin dato';
   }
   if (Number.isInteger(threshold)) {
-    return `Umbral de activacion: ${threshold} %`;
+    return `${threshold} %`;
   }
-  return `Umbral de activacion: ${threshold.toFixed(1)} %`;
+  return `${threshold.toFixed(1)} %`;
 }
 
-// ------------------------------------------------------------------ //
-// Trend chart
-// ------------------------------------------------------------------ //
+// Trend chart state and helpers.
 let trendChart = null;
 const raspberryTrendCharts = {
   temperature: null,
@@ -97,22 +101,28 @@ const raspberryTrendCharts = {
   pressure: null,
 };
 const esp32AmbientTrendCharts = {
-  temperature: null,
-  humidity: null,
+  ambient_temperature: null,
+  ambient_humidity: null,
+  light: null,
 };
+
+// ESP32 sources that use ambient trend layout.
+const ESP32_AMBIENT_SOURCES = new Set(['esp32_01', 'esp32_02']);
 const TREND_COLORS = {
   soil_humidity: '#2e7d32',
-  on_threshold_percent: '#d32f2f',
-  temperature: '#e53935',
-  humidity: '#1e88e5',
+  on_threshold_soil_vwc: '#d32f2f',
+  ambient_temperature: '#e53935',
+  ambient_humidity: '#1e88e5',
   pressure: '#6a1b9a',
+  light: '#f9a825',
 };
 const FIELD_UNITS = {
   soil_humidity: '%',
-  on_threshold_percent: '%',
-  temperature: '°C',
-  humidity: '%',
+  on_threshold_soil_vwc: '%',
+  ambient_temperature: '°C',
+  ambient_humidity: '%',
   pressure: 'hPa',
+  light: '%',
 };
 
 function destroyChartInstance(chart) {
@@ -142,7 +152,7 @@ function trendChartLayoutForSource(source) {
     single.classList.add('hidden');
     multi.classList.remove('hidden');
     esp32.classList.add('hidden');
-  } else if (source === 'esp32_01') {
+  } else if (ESP32_AMBIENT_SOURCES.has(source)) {
     single.classList.add('hidden');
     multi.classList.add('hidden');
     esp32.classList.remove('hidden');
@@ -209,8 +219,8 @@ function buildDataset(field, data, index = 0) {
     backgroundColor: color + '22',
     tension: 0.3,
     pointRadius: 2,
-    borderWidth: field === 'on_threshold_percent' ? 2 : 3,
-    borderDash: field === 'on_threshold_percent' ? [8, 6] : [],
+    borderWidth: field === 'on_threshold_soil_vwc' ? 2 : 3,
+    borderDash: field === 'on_threshold_soil_vwc' ? [8, 6] : [],
     fill: false,
   };
 }
@@ -248,17 +258,17 @@ function initRaspberryTrendCharts(trendPayload) {
 }
 
 function initEsp32AmbientTrendCharts(trendPayload) {
-  ['temperature', 'humidity'].forEach(field => {
+  ['ambient_temperature', 'ambient_humidity', 'light'].forEach(field => {
     const canvas = document.getElementById(`trend-chart-esp32-${field}`);
     if (!canvas) return;
 
     let datasets = [];
     let yTitle = '';
 
-    if (field === 'humidity') {
+    if (field === 'ambient_humidity') {
       // En la grafica de humedad ambiental tambien trazamos humedad de suelo.
       datasets = [
-        buildDataset('humidity', trendPayload.datasets.humidity || []),
+        buildDataset('ambient_humidity', trendPayload.datasets.ambient_humidity || []),
         buildDataset('soil_humidity', trendPayload.datasets.soil_humidity || [], 1),
       ];
       yTitle = 'Humedad (%)';
@@ -271,16 +281,12 @@ function initEsp32AmbientTrendCharts(trendPayload) {
     esp32AmbientTrendCharts[field] = new Chart(canvas, {
       type: 'line',
       data: { datasets },
-      options: buildTrendOptions(yTitle),
+      options: buildTrendOptions(yTitle, (field === 'light') ? { yMin: 0, yMax: 100 } : {}),
     });
   });
 }
 
-/**
- * Builds (or rebuilds) the irrigation trend chart.
- *
- * @param {object} trendPayload Response from GET /api/trend.
- */
+// Build or rebuild trend chart based on source type.
 function initTrendChart(trendPayload) {
   if (!trendPayload || !trendPayload.datasets) return;
 
@@ -293,7 +299,7 @@ function initTrendChart(trendPayload) {
     return;
   }
 
-  if (source === 'esp32_01') {
+  if (ESP32_AMBIENT_SOURCES.has(source)) {
     initEsp32AmbientTrendCharts(trendPayload);
     return;
   }
@@ -301,9 +307,12 @@ function initTrendChart(trendPayload) {
   initEspTrendChart(trendPayload);
 }
 
-// ------------------------------------------------------------------ //
-// Live card update (called after /api/latest refresh)
-// ------------------------------------------------------------------ //
+/**
+ * Update dashboard cards with latest sensor readings.
+ * Iterates over /api/latest response and updates each card's value,
+ * timestamp, and metadata (watering duration, threshold, last watering).
+ * @param {Array<{source:string, field:string, value:number, unit:string, recorded_at:string}>} data
+ */
 function updateCards(data) {
   const bySource = {};
   data.forEach(r => {
@@ -311,7 +320,7 @@ function updateCards(data) {
     bySource[r.source][r.field] = r;
   });
 
-  // Re-render only the value + time inside each existing card
+  // Update value and timestamp in each existing card.
   data.forEach(r => {
     const panel = document.getElementById(`panel-${r.source}`);
     if (!panel) return;
@@ -324,62 +333,82 @@ function updateCards(data) {
         if (BOOLEAN_FIELDS.has(r.field)) {
           const on = r.value !== 0;
           valEl.className = `card-value status-badge ${on ? 'status-on' : 'status-off'}`;
-          valEl.textContent = on ? 'Activo' : 'Inactivo';
+          valEl.textContent = on ? 'Conectado' : 'Desconectado';
         } else {
           valEl.className = 'card-value';
-          valEl.innerHTML = `${parseFloat(r.value).toFixed(1)} <small>${r.unit}</small>`;
+          valEl.textContent = `${parseFloat(r.value).toFixed(1)} `;
+          const unitEl = document.createElement('small');
+          unitEl.textContent = r.unit || '';
+          valEl.appendChild(unitEl);
         }
       }
       if (timeEl) timeEl.textContent = r.recorded_at;
+    });
 
-      // En la tarjeta compuesta de "Riego Activo" actualizamos metadatos
-      // relacionados para mantener una sola fuente visual de verdad.
-      if (r.field === 'watering') {
-        const sourceSnapshot = bySource[r.source] || {};
-
-        const durationEl = card.querySelector('.watering-duration');
-        if (durationEl) {
-          durationEl.textContent = formatRelayDuration(sourceSnapshot[RELAY_ON_TIME_FIELD]?.value);
+    const soilCard = panel.querySelector('.card.soil_humidity');
+    if (soilCard) {
+      if (r.field === 'soil_humidity' || r.field === 'percent' || r.field === 'soil_vwc') {
+        const valEl = soilCard.querySelector('.soil-humidity-value');
+        const timeEl = soilCard.querySelector('.soil-time');
+        if (valEl) {
+          valEl.textContent = `${parseFloat(r.value).toFixed(1)} %`;
         }
+        if (timeEl) timeEl.textContent = r.recorded_at;
+      }
 
-        const thresholdEl = card.querySelector('.watering-threshold');
-        if (thresholdEl) {
-          thresholdEl.textContent = formatThreshold(sourceSnapshot[ON_THRESHOLD_FIELD]?.value);
+      const sourceSnapshot = bySource[r.source] || {};
+
+      const wateringEl = soilCard.querySelector('.soil-watering-value');
+      if (wateringEl) {
+        const wateringReading = sourceSnapshot.watering;
+        if (wateringReading) {
+          const on = wateringReading.value !== 0;
+          wateringEl.className = `soil-watering-value status-badge ${on ? 'status-on' : 'status-off'}`;
+          wateringEl.textContent = on ? 'Activo' : 'Inactivo';
         }
+      }
 
-        let lastEpoch = Number(sourceSnapshot[LAST_WATERING_FIELD]?.value);
-        if (!Number.isFinite(lastEpoch) || lastEpoch <= 0) {
-          const secValue = Number(sourceSnapshot[LAST_WATERED_SEC_FIELD]?.value);
-          if (Number.isFinite(secValue) && secValue >= 0) {
-            const secRecordedAt = sourceSnapshot[LAST_WATERED_SEC_FIELD]?.recorded_at;
-            const recEpoch = recordedAtToEpochSeconds(secRecordedAt);
-            if (Number.isFinite(recEpoch)) {
-              lastEpoch = recEpoch - secValue;
-            }
-          }
-        }
+      const durationEl = soilCard.querySelector('.watering-duration');
+      if (durationEl) {
+        durationEl.textContent = formatRelayDuration(sourceSnapshot[RELAY_ON_TIME_FIELD]?.value);
+      }
 
-        // Si no hay dato nuevo (ej. -1 tras reinicio del ESP), conservamos
-        // el ultimo valor valido ya renderizado en el DOM.
-        if (!Number.isFinite(lastEpoch) || lastEpoch <= 0) {
-          lastEpoch = readPersistedEpoch(card);
-        }
+      const thresholdEl = soilCard.querySelector('.watering-threshold');
+      if (thresholdEl) {
+        thresholdEl.textContent = formatThreshold(sourceSnapshot[ON_THRESHOLD_FIELD]?.value);
+      }
 
-        const extraEl = card.querySelector('.last-watering-time');
-        if (extraEl) {
-          extraEl.textContent = formatLastWatering(lastEpoch);
-          if (Number.isFinite(lastEpoch) && lastEpoch > 0) {
-            extraEl.setAttribute('data-last-watering-epoch', String(lastEpoch));
+      let lastEpoch = Number(sourceSnapshot[LAST_WATERING_FIELD]?.value);
+      if (!Number.isFinite(lastEpoch) || lastEpoch <= 0) {
+        const secValue = Number(sourceSnapshot[LAST_WATERED_SEC_FIELD]?.value);
+        if (Number.isFinite(secValue) && secValue >= 0) {
+          const secRecordedAt = sourceSnapshot[LAST_WATERED_SEC_FIELD]?.recorded_at;
+          const recEpoch = recordedAtToEpochSeconds(secRecordedAt);
+          if (Number.isFinite(recEpoch)) {
+            lastEpoch = recEpoch - secValue;
           }
         }
       }
-    });
+
+      if (!Number.isFinite(lastEpoch) || lastEpoch <= 0) {
+        lastEpoch = readPersistedEpoch(soilCard);
+      }
+
+      const extraEl = soilCard.querySelector('.last-watering-time');
+      if (extraEl) {
+        extraEl.textContent = formatLastWatering(lastEpoch);
+        if (Number.isFinite(lastEpoch) && lastEpoch > 0) {
+          extraEl.setAttribute('data-last-watering-epoch', String(lastEpoch));
+        }
+      }
+    }
 
     const atmosphereCard = panel.querySelector('.card.atmosphere');
     if (atmosphereCard) {
       const snapshot = bySource[r.source] || {};
-      const temp = snapshot.temperature;
-      const hum = snapshot.humidity;
+      const temp = snapshot.ambient_temperature;
+      const hum = snapshot.ambient_humidity;
+      const light = snapshot.light;
 
       const tempEl = atmosphereCard.querySelector('.atmo-temp');
       if (tempEl) {
@@ -391,34 +420,45 @@ function updateCards(data) {
         humEl.textContent = hum ? `${parseFloat(hum.value).toFixed(1)} %` : '--';
       }
 
+      const lightEl = atmosphereCard.querySelector('.atmo-light');
+      if (lightEl) {
+        lightEl.textContent = light ? `${parseFloat(light.value).toFixed(1)} %` : '--';
+      }
+
       const timeEl = atmosphereCard.querySelector('.atmo-time');
       if (timeEl) {
-        const tempTime = temp ? String(temp.recorded_at || '') : '';
-        const humTime = hum ? String(hum.recorded_at || '') : '';
-        timeEl.textContent = tempTime > humTime ? tempTime : humTime;
+        const times = [
+          temp ? String(temp.recorded_at || '') : '',
+          hum ? String(hum.recorded_at || '') : '',
+          light ? String(light.recorded_at || '') : '',
+        ];
+        timeEl.textContent = times.reduce((a, b) => a > b ? a : b);
+      }
+    }
+
+    const onlineCard = panel.querySelector('.card.online');
+    if (onlineCard) {
+      const snapshot = bySource[r.source] || {};
+      const online = snapshot.online;
+      const statusEl = onlineCard.querySelector('.online-status-value');
+      if (statusEl) {
+        const on = online && online.value !== 0;
+        statusEl.className = `soil-info-value online-status-value status-badge ${on ? 'status-on' : 'status-off'}`;
+        statusEl.textContent = on ? 'Conectado' : 'Desconectado';
+      }
+      const timeEl = onlineCard.querySelector('.online-time');
+      if (timeEl) {
+        timeEl.textContent = online ? String(online.recorded_at || '') : '--';
       }
     }
   });
 }
 
-// ------------------------------------------------------------------ //
-// Remote watering command — sends POST /api/command/water
-// ------------------------------------------------------------------ //
-
 /**
- * sendWaterCommand — Sends a manual irrigation command to the ESP8266.
- *
- * Flow:
- *  1. The dashboard calls POST /api/command/water on the Flask server.
- *  2. Flask publishes {"action":"water"} to "commands/esp8266" via MQTT.
- *  3. The ESP8266 subscribes to that topic; upon receiving the message its
- *     mqttCallback() calls startWatering(force=true), which:
- *       • cancels any active cooldown,
- *       • opens the solenoid valve (relay HIGH),
- *       • starts the DURACION_RIEGO_MS countdown.
- *  4. The dashboard shows a success or error badge next to the button.
- *
- * @param {HTMLElement} btn  The button element that triggered the action.
+ * Send manual watering command via POST /api/command/water.
+ * Disables the button during the request and shows success/error status.
+ * @param {HTMLElement} btn - The button element that triggered the action.
+ * @param {string} [source='esp8266'] - Device source name.
  */
 async function sendWaterCommand(btn, source = 'esp8266') {
   const statusEl = document.getElementById(`water-cmd-status-${source}`);
@@ -451,7 +491,7 @@ async function sendWaterCommand(btn, source = 'esp8266') {
   }
 
   btn.disabled = false;
-  // Limpiar el mensaje de estado después de 6 segundos.
+  // Clear command status after 6 seconds.
   setTimeout(() => {
     if (statusEl) {
       statusEl.textContent = '';
@@ -460,9 +500,7 @@ async function sendWaterCommand(btn, source = 'esp8266') {
   }, 6000);
 }
 
-// ------------------------------------------------------------------ //
-// Load trend chart from history API
-// ------------------------------------------------------------------ //
+// Load trend chart from /api/trend.
 
 const DEFAULT_TREND_SOURCE = 'esp8266';
 let trendSource = DEFAULT_TREND_SOURCE;
@@ -470,6 +508,7 @@ const TREND_RANGE_SELECT_ID = 'trend-range';
 const TREND_TITLE_BY_SOURCE = {
   esp8266: 'Tendencia de Riego',
   esp32_01: 'Tendencia Ambiental',
+  esp32_02: 'Tendencia Ambiental',
   raspberrypi: 'Tendencia Ambiental',
 };
 
@@ -514,10 +553,7 @@ function syncTrendSourceWithActivePanel({ reload = true } = {}) {
   setTrendSource(source, { reload });
 }
 
-/**
- * Reads the selected range from the selector.
- * Falls back to "ultimos" when the selector is not present.
- */
+// Return selected trend range with 1h fallback.
 function getSelectedTrendRange() {
   const select = document.getElementById(TREND_RANGE_SELECT_ID);
   if (!select) return '1h';
@@ -525,9 +561,8 @@ function getSelectedTrendRange() {
 }
 
 /**
- * Loads trend data for the selected range and renders the chart.
- *
- * @param {string} rangeKey One of: 1h|1d|1w|1m|1y
+ * Fetch trend data from /api/trend and render charts for the active source.
+ * @param {string} [rangeKey='1h'] - One of: 1h, 1d, 1w, 1m, 1y.
  */
 async function loadTrendChart(rangeKey = '1h') {
   try {
@@ -544,23 +579,11 @@ async function loadTrendChart(rangeKey = '1h') {
   }
 }
 
-/**
- * Handler for the range selector change event.
- */
+// Range selector handler.
 function onTrendRangeChange() {
   loadTrendChart(getSelectedTrendRange());
 }
 
-// ------------------------------------------------------------------ //
-// Auto-refresh every 30 seconds
-// ------------------------------------------------------------------ //
-setInterval(async () => {
-  try {
-    const resp = await fetch('/api/latest');
-    if (!resp.ok) return;
-    const data = await resp.json();
-    updateCards(data);
-    syncTrendSourceWithActivePanel({ reload: false });
-    await loadTrendChart(getSelectedTrendRange());
-  } catch (_) { /* network error – ignore */ }
-}, 30000);
+// Nota: el refresco periodico fue removido.
+// El dashboard se actualiza unicamente cuando el usuario presiona
+// el boton "Actualizar" (ver refreshLatest() en templates/index.html).

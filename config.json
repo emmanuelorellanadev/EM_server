@@ -7,23 +7,28 @@
     "topics": {
       "esp8266": "sensors/esp8266",
       "esp32_01": "sensors/esp32_01",
+      "esp32_02": "sensors/esp32_02",
       "raspberrypi": "sensors/raspberrypi",
       "all": "sensors/#",
       "cmd_esp8266": "commands/esp8266",
       "cmd_esp32_01": "commands/esp32_01",
+      "cmd_esp32_02": "commands/esp32_02",
       "device_status": "devices/+/status"
     },
     "client_id_subscriber": "em_server_subscriber",
     "client_id_sensehat": "em_server_sensehat"
   },
   "database": {
-    "path": "em_server.db"
+    "path": "em_db/em_server.db"
   },
   "web": {
     "host": "0.0.0.0",
     "port": 8080,
     "debug": false,
-    "secret_key": "change-this-secret-key-in-production"
+    "secret_key": "change-this-secret-key-in-production",
+    "display_timezone": "America/Guatemala",
+    "esp_panel_sources": ["esp8266", "esp32_01", "esp32_02"],
+    "default_trend_source": "esp8266"
   },
   "sense_hat": {
     "publish_interval_seconds": 30,
@@ -31,9 +36,6 @@
   },
   "field_mappings": {
     "esp8266": {
-      "percent": "soil_humidity"
-    },
-    "esp32_01": {
       "percent": "soil_humidity"
     }
   }

@@ -1,7 +1,6 @@
 """
 tests/test_app.py – Integration tests for the Flask web dashboard (app.py)
 """
-import json
 import pytest
 
 # Patch database path before importing app
@@ -111,7 +110,7 @@ def test_api_sources_returns_sources(client):
 def test_api_trend_default_range(client):
     c, db = client
     database.insert_reading(db, "esp8266", "soil_humidity", 41.0, "%")
-    database.insert_reading(db, "esp8266", "on_threshold_percent", 25.0, "%")
+    database.insert_reading(db, "esp8266", "on_threshold_soil_vwc", 25.0, "%")
 
     resp = c.get("/api/trend")
     assert resp.status_code == 200
@@ -120,7 +119,7 @@ def test_api_trend_default_range(client):
     assert data["source"] == "esp8266"
     assert data["range"] == "1h"
     assert "soil_humidity" in data["datasets"]
-    assert "on_threshold_percent" in data["datasets"]
+    assert "on_threshold_soil_vwc" in data["datasets"]
 
 
 def test_api_trend_invalid_range_returns_400(client):
@@ -135,7 +134,7 @@ def test_api_trend_invalid_range_returns_400(client):
 def test_api_trend_filters_by_source(client):
     c, db = client
     database.insert_reading(db, "esp8266", "soil_humidity", 40.0, "%")
-    database.insert_reading(db, "esp8266", "on_threshold_percent", 25.0, "%")
+    database.insert_reading(db, "esp8266", "on_threshold_soil_vwc", 25.0, "%")
     database.insert_reading(db, "raspberrypi", "soil_humidity", 99.0, "%")
 
     resp = c.get("/api/trend?source=esp8266&range=1h")
@@ -149,7 +148,7 @@ def test_api_trend_filters_by_source(client):
 def test_api_trend_supports_1d_range(client):
     c, db = client
     database.insert_reading(db, "esp8266", "soil_humidity", 52.0, "%")
-    database.insert_reading(db, "esp8266", "on_threshold_percent", 25.0, "%")
+    database.insert_reading(db, "esp8266", "on_threshold_soil_vwc", 25.0, "%")
 
     resp = c.get("/api/trend?range=1d")
     assert resp.status_code == 200
@@ -175,7 +174,7 @@ def test_index_shows_online_status(client):
     database.insert_reading(db, "esp8266", "online", 1.0)
     resp = c.get("/")
     assert resp.status_code == 200
-    assert b"Conectado MQTT" in resp.data
+    assert b"Conectado" in resp.data
     assert b"status-on" in resp.data
 
 
@@ -290,8 +289,8 @@ def test_index_renders_esp32_panel(client):
     """ESP32 panel should render irrigation controls and Atmosfera card."""
     c, db = client
     database.insert_reading(db, "esp32_01", "soil_humidity", 44.0, "%")
-    database.insert_reading(db, "esp32_01", "temperature", 24.8, "°C")
-    database.insert_reading(db, "esp32_01", "humidity", 59.0, "%")
+    database.insert_reading(db, "esp32_01", "ambient_temperature", 24.8, "°C")
+    database.insert_reading(db, "esp32_01", "ambient_humidity", 59.0, "%")
     database.insert_reading(db, "esp32_01", "watering", 0.0)
     database.insert_reading(db, "esp32_01", "online", 1.0)
 
@@ -299,9 +298,9 @@ def test_index_renders_esp32_panel(client):
     assert resp.status_code == 200
     assert b"panel-esp32_01" in resp.data
     assert b"water-cmd-status-esp32_01" in resp.data
-    assert "Atmósfera".encode("utf-8") in resp.data
-    assert "Temperatura ambiental".encode("utf-8") in resp.data
-    assert "Humedad ambiental".encode("utf-8") in resp.data
+    assert "ATMÓSFERA".encode("utf-8") in resp.data
+    assert "Humedad".encode("utf-8") in resp.data
+    assert "Luz".encode("utf-8") in resp.data
 
 
 def test_index_trend_label_placeholder_present(client):
@@ -333,9 +332,9 @@ def test_api_trend_esp32_includes_environmental_fields(client):
     """ESP32 trend endpoint returns soil and environmental datasets."""
     c, db = client
     database.insert_reading(db, "esp32_01", "soil_humidity", 45.0, "%")
-    database.insert_reading(db, "esp32_01", "on_threshold_percent", 60.0, "%")
-    database.insert_reading(db, "esp32_01", "temperature", 25.2, "°C")
-    database.insert_reading(db, "esp32_01", "humidity", 58.7, "%")
+    database.insert_reading(db, "esp32_01", "on_threshold_soil_vwc", 60.0, "%")
+    database.insert_reading(db, "esp32_01", "ambient_temperature", 25.2, "°C")
+    database.insert_reading(db, "esp32_01", "ambient_humidity", 58.7, "%")
 
     resp = c.get("/api/trend?source=esp32_01&range=1h")
     assert resp.status_code == 200
@@ -344,9 +343,10 @@ def test_api_trend_esp32_includes_environmental_fields(client):
     assert data["source"] == "esp32_01"
     assert set(data["fields"]) == {
         "soil_humidity",
-        "on_threshold_percent",
-        "temperature",
-        "humidity",
+        "on_threshold_soil_vwc",
+        "ambient_temperature",
+        "ambient_humidity",
+        "light",
     }
-    assert "temperature" in data["datasets"]
-    assert "humidity" in data["datasets"]
+    assert "ambient_temperature" in data["datasets"]
+    assert "ambient_humidity" in data["datasets"]

@@ -1,30 +1,26 @@
-"""
-mqtt_client.py – MQTT subscriber service for EM_server.
+"""MQTT subscriber service.
 
-Subscribes to all sensor topics, parses incoming JSON payloads,
-and persists the data using the database module.
+Flow:
+1) Subscribe to sensor and status topics.
+2) Decode payloads and normalize source name.
+3) Apply optional field mappings from config.
+4) Persist readings in SQLite.
 
-Run as a standalone process:
+Run:
     python mqtt_client.py [--config config.json]
 """
 
 import argparse
 import json
-import logging
-import os
 import signal
-import sys
 import time
 
 import paho.mqtt.client as mqtt
 
 from database import init_db, insert_reading, insert_readings_from_payload
+from logging_setup import setup_logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger("mqtt_client")
+logger = setup_logging("mqtt_client")
 
 _running = True
 
@@ -76,19 +72,22 @@ def _on_message(client, userdata, msg):
             logger.warning("Could not decode payload on %s: %s", topic, exc)
             return
 
-        # Derive a human-readable source name from the topic path.
-        # e.g. "sensors/esp8266" -> "esp8266"
-        #      "sensors/raspberrypi" -> "raspberrypi"
+        # Source is the last path segment in sensor topics.
         parts = topic.split("/")
         source = parts[-1] if len(parts) >= 2 else topic
 
-    # Apply per-source field name mappings defined in config.json.
-    # Example mapping: esp8266 "percent" -> "soil_humidity"
+    # Normalize source for deterministic matching across config/UI/API.
+    source = str(source).strip().lower()
+    if not source:
+        logger.warning("Ignoring payload with empty source. topic=%s", topic)
+        return
+
+    # Apply optional field name mapping per source.
     mappings = userdata["config"].get("field_mappings", {}).get(source, {})
     if mappings:
         payload = {mappings.get(k, k): v for k, v in payload.items()}
 
-    logger.debug("Message from %s: %s", source, payload)
+    logger.info("Message from %s on %s: %s", source, topic, payload)
     if source.startswith("esp") and "last_watered_sec" not in payload:
         logger.warning(
             "Payload %s sin 'last_watered_sec'. keys=%s payload=%s",
@@ -123,8 +122,7 @@ def _on_message(client, userdata, msg):
                 "unix_s",
             )
         else:
-            # ESP devices send -1 after boot when there is no in-memory
-            # irrigation history yet. We keep the last known timestamp.
+            # Keep previous last_watering_at_epoch on sentinel -1.
             logger.info(
                 "Ignoring sentinel last_watered_sec=-1 from %s; "
                 "preserving previous last_watering_at_epoch",

@@ -1,18 +1,22 @@
-"""
-database.py – SQLite data-access layer for the EM_server.
+"""SQLite data-access layer.
 
-Stores sensor readings from any MQTT source (ESP8266, Raspberry Pi, etc.)
-in a single normalised table so new sensor types can be added without
-schema changes.
+Stores readings in a single table:
+- source: device name (esp8266, esp32_01, raspberrypi, ...)
+- field: metric name
+- value/unit/recorded_at: metric payload and timestamp
 """
 
+import logging
+import os
 import sqlite3
-import json
 from datetime import datetime
+from typing import Optional
 from zoneinfo import ZoneInfo
 
-# Guatemala does not observe daylight saving time; it is always UTC-6.
+# Fixed timezone used for persisted timestamps.
 _TZ_GUATEMALA = ZoneInfo("America/Guatemala")
+
+logger = logging.getLogger("database")
 
 
 def get_connection(db_path: str) -> sqlite3.Connection:
@@ -25,6 +29,9 @@ def get_connection(db_path: str) -> sqlite3.Connection:
 
 def init_db(db_path: str) -> None:
     """Create tables if they do not already exist."""
+    db_dir = os.path.dirname(db_path)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
     with get_connection(db_path) as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS readings (
@@ -50,7 +57,7 @@ def insert_reading(
     field: str,
     value: float,
     unit: str = "",
-    recorded_at: datetime | None = None,
+    recorded_at: Optional[datetime] = None,
 ) -> None:
     if recorded_at is None:
         recorded_at = datetime.now(_TZ_GUATEMALA)
@@ -61,6 +68,7 @@ def insert_reading(
             "VALUES (?, ?, ?, ?, ?)",
             (source, field, value, unit, ts),
         )
+    logger.debug("Reading stored: source=%s field=%s value=%s", source, field, value)
 
 
 def insert_readings_from_payload(
@@ -69,7 +77,7 @@ def insert_readings_from_payload(
     """
     Parse a JSON MQTT payload and insert one row per sensor field.
 
-    Expected payload shape (all fields optional):
+    Supported payload shapes:
     {
         "temperature":    { "value": 23.5, "unit": "°C"  },
         "humidity":       { "value": 60.1, "unit": "%"   },
@@ -83,8 +91,7 @@ def insert_readings_from_payload(
         { "percent": 42.3, "watering": false,
           "on_threshold_percent": 35, "relay_on_time_s": 1.0 }
 
-    Boolean values are stored as 1.0 (True) or 0.0 (False).
-    String values are silently skipped.
+    Booleans are stored as 1.0/0.0. Non-numeric strings are ignored.
     """
     now = datetime.now(_TZ_GUATEMALA)
     for field, raw in payload.items():
@@ -92,18 +99,20 @@ def insert_readings_from_payload(
             value = raw.get("value")
             unit = raw.get("unit", "")
         elif isinstance(raw, bool):
-            # bool must be checked before int since bool is a subclass of int
+            # bool must be checked before int (Python bool is int subclass)
             value = 1.0 if raw else 0.0
             unit = ""
         elif isinstance(raw, (int, float)):
             value = raw
             unit = ""
         else:
-            continue  # skip non-numeric fields (e.g. strings)
+            continue
         try:
             insert_reading(db_path, source, field, float(value), unit, now)
         except (TypeError, ValueError):
-            pass
+            logger.warning(
+                "Skipping field=%s with unparsable value=%r", field, raw
+            )
 
 
 def get_latest_readings(db_path: str) -> list[dict]:
@@ -125,8 +134,8 @@ def get_latest_readings(db_path: str) -> list[dict]:
 
 def get_readings_history(
     db_path: str,
-    source: str | None = None,
-    field: str | None = None,
+    source: Optional[str] = None,
+    field: Optional[str] = None,
     limit: int = 100,
 ) -> list[dict]:
     """Return recent readings, optionally filtered by source and/or field."""
@@ -156,13 +165,12 @@ def get_field_history(
     db_path: str,
     source: str,
     field: str,
-    since: datetime | None = None,
-    limit: int | None = None,
+    since: Optional[datetime] = None,
+    limit: Optional[int] = None,
 ) -> list[dict]:
     """Return time-ordered history for one source/field pair.
 
-    This helper is intentionally small and explicit so API endpoints can build
-    custom trend payloads without duplicating SQL everywhere.
+    Used by trend endpoints for source/field time series.
 
     Args:
         db_path: SQLite database path.
@@ -179,14 +187,13 @@ def get_field_history(
 
     if since is not None:
         conditions.append("recorded_at >= ?")
-        # Keep the same fixed UTC-6 offset format used by insert_reading().
+        # Keep same timestamp format used by insert_reading().
         params.append(since.strftime("%Y-%m-%dT%H:%M:%S-06:00"))
 
     where = " AND ".join(conditions)
 
     if limit is not None:
-        # Fetch most recent rows efficiently, then reverse so callers always
-        # receive chronological data for plotting.
+        # Fetch newest rows, then reverse to chronological order.
         sql = f"""
             SELECT source, field, value, unit, recorded_at
             FROM readings
@@ -219,14 +226,10 @@ def get_sources(db_path: str) -> list[str]:
     return [r["source"] for r in rows]
 
 
-def get_last_valid_last_watering_epoch(db_path: str, source: str) -> float | None:
+def get_last_valid_last_watering_epoch(db_path: str, source: str) -> Optional[float]:
     """Return the latest valid "ultimo riego" epoch for one source.
 
-    Why this helper exists:
-    - Some ESP8266 payloads publish ``last_watered_sec = -1`` after reboot.
-    - In those cases, UI should keep the last known valid watering timestamp.
-
-    Lookup strategy (most reliable first):
+    Lookup strategy:
     1) last positive value from ``last_watering_at_epoch``.
     2) fallback from latest non-negative ``last_watered_sec`` + ``recorded_at``.
     """

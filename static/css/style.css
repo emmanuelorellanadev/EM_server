@@ -128,38 +128,144 @@ main {
 .card-time { font-size: .7rem; color: var(--muted); }
 .card-extra { font-size: .75rem; color: var(--muted); }
 
-/* Metadatos de la tarjeta compuesta "Riego Activo" */
-.watering .card-extra {
-  line-height: 1.35;
+/* ---- Atmosphere card (blue theme) ---------------------------------- */
+.card.atmosphere {
+  background: linear-gradient(145deg, #f0f8ff 0%, #e3f2fd 100%);
+  border: 1px solid #bbdefb;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 1.5rem 1rem;
+}
+.card.atmosphere .card-icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.25rem;
+}
+.card.atmosphere .card-title {
+  color: #0d47a1;
+}
+.card.atmosphere .soil-info-grid {
+  background: rgba(21, 101, 192, 0.06);
+}
+.card.atmosphere .soil-info-row + .soil-info-row {
+  border-top-color: rgba(21, 101, 192, 0.1);
+}
+.card.atmosphere .soil-info-label {
+  color: #1565c0;
+}
+.card.atmosphere .soil-info-value {
+  color: #0d47a1;
+}
+.card.atmosphere .card-time {
+  color: #5c8bb5;
 }
 
-.atmosphere .card-value {
-  font-size: 1rem;
+/* ---- Online card (green theme) ------------------------------------- */
+.card.online {
+  background: linear-gradient(145deg, #f1f8e9 0%, #e8f5e9 100%);
+  border: 1px solid #c8e6c9;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 1.5rem 1rem;
 }
-
-.atmo-line {
-  display: flex;
-  justify-content: space-between;
-  gap: .8rem;
-  font-size: .9rem;
+.card.online .card-icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.25rem;
 }
-
-.atmo-label {
-  color: var(--muted);
+.card.online .card-title {
+  color: #1b5e20;
 }
-
-.atmo-value {
-  font-weight: 700;
+.card.online .online-status-value.status-badge {
+  font-size: 0.9rem;
+  padding: 0.2rem 0.7rem;
+}
+.card.online .status-on {
+  background: #a5d6a7;
+  color: #1b5e20;
+}
+.card.online .status-off {
+  background: #ffccbc;
+  color: #bf360c;
+}
+.card.online .card-time {
+  color: #558b2f;
+}
+.card.online .soil-info-grid {
+  background: rgba(27, 94, 32, 0.06);
+}
+.card.online .soil-info-row + .soil-info-row {
+  border-top-color: rgba(27, 94, 32, 0.1);
+}
+.card.online .soil-info-label {
+  color: #2e7d32;
+}
+.card.online .soil-info-value {
+  color: #1b5e20;
 }
 
 /* ---- Sensor colour accents ---------------------------------------- */
 .temperature .card-icon { color: #e53935; }
 .humidity    .card-icon { color: #1e88e5; }
 .soil_humidity .card-icon { color: #6d4c41; }
+
+/* ---- Soil sensor card (special design) ---------------------------- */
+.card.soil_humidity {
+  background: linear-gradient(145deg, #faf7f2 0%, #f0ebe0 100%);
+  border: 1px solid #d7ccc8;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 1.5rem 1rem;
+}
+.card.soil_humidity .card-icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.25rem;
+}
+.card-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #4e342e;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+}
+.soil-time {
+  font-size: 0.7rem;
+  color: #a1887f;
+}
+.soil-info-grid {
+  width: 100%;
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.8rem;
+  background: rgba(109, 76, 65, 0.06);
+  border-radius: 8px;
+}
+.soil-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.25rem 0;
+  font-size: 0.8rem;
+  gap: 0.5rem;
+}
+.soil-info-row + .soil-info-row {
+  border-top: 1px solid rgba(109, 76, 65, 0.1);
+}
+.soil-info-label {
+  color: #8d6e63;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.soil-info-value {
+  font-weight: 600;
+  color: #4e342e;
+  text-align: right;
+}
+
 .soil_raw    .card-icon { color: #9e9e9e; }
 .light       .card-icon { color: #f9a825; }
 .pressure    .card-icon { color: #6a1b9a; }
-.watering    .card-icon { color: #0288d1; }
 .cooldown    .card-icon { color: #ff8f00; }
 
 /* ---- Status badge (boolean on/off fields) -------------------------- */
@@ -189,18 +295,19 @@ main {
 }
 
 .cmd-btn {
-  background: var(--primary);
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  padding: .5rem 1.1rem;
-  font-size: .95rem;
-  font-weight: 600;
+  background: transparent;
+  color: #6d4c41;
+  border: 1px solid #d7ccc8;
+  border-radius: 6px;
+  padding: .3rem .8rem;
+  font-size: .8rem;
+  font-weight: 500;
   cursor: pointer;
   transition: background .2s, opacity .2s;
+  margin-top: 0.4rem;
 }
-.cmd-btn:hover  { background: var(--primary-lt); }
-.cmd-btn:disabled { opacity: .55; cursor: not-allowed; }
+.cmd-btn:hover  { background: rgba(109, 76, 65, 0.08); }
+.cmd-btn:disabled { opacity: .45; cursor: not-allowed; }
 
 .cmd-status {
   font-size: .9rem;

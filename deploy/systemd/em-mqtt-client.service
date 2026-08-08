@@ -1,5 +1,5 @@
 [Unit]
-Description=EM Server Sense HAT MQTT Publisher
+Description=EM Server MQTT Subscriber
 After=network.target mosquitto.service
 Wants=mosquitto.service
 
@@ -7,7 +7,7 @@ Wants=mosquitto.service
 Type=simple
 User=pi
 WorkingDirectory=/home/pi/EM_server
-ExecStart=/home/pi/EM_server/venv/bin/python sense_hat_client.py --config config.json
+ExecStart=/home/pi/EM_server/venv/bin/python -m em_server.services.mqtt_service --config config.json
 Restart=on-failure
 RestartSec=10
 

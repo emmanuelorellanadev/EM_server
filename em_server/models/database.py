@@ -1,4 +1,4 @@
-"""SQLite data-access layer.
+"""SQLite data-access layer for EM_server.
 
 Stores readings in a single table:
 - source: device name (esp8266, esp32_01, raspberrypi, ...)
@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 # Fixed timezone used for persisted timestamps.
 _TZ_GUATEMALA = ZoneInfo("America/Guatemala")
 
-logger = logging.getLogger("database")
+logger = logging.getLogger("em_server.models.database")
 
 
 def get_connection(db_path: str) -> sqlite3.Connection:

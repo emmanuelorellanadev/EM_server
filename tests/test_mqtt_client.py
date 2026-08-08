@@ -1,9 +1,9 @@
 """
-tests/test_mqtt_client.py – Unit tests for field normalization in mqtt_client.py
+tests/test_mqtt_client.py – Unit tests for field normalization in mqtt_service.py
 """
 import pytest
-import database
-from mqtt_client import _on_message
+from em_server.models import database
+from em_server.services.mqtt_service import _on_message
 
 
 class _FakeMsg:

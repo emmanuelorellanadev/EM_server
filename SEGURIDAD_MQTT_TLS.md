@@ -18,9 +18,9 @@ Incluye teoria y pasos practicos para implementar TLS/mTLS en `EM_server`.
 ### Hallazgos principales
 
 - `config.json` usa `mqtt.port = 1883` y credenciales vacias.
-- `mqtt_client.py` conecta con `client.connect(...)` sin `tls_set(...)`.
-- `sense_hat_client.py` tambien conecta sin TLS.
-- `app.py` publica comandos con `paho.mqtt.publish.single(...)` sin bloque `tls`.
+- `em_server/services/mqtt_service.py` conecta con `client.connect(...)` sin `tls_set(...)`.
+- `em_server/services/sensehat_service.py` tambien conecta sin TLS.
+- `em_server/routes/api.py` publica comandos con `paho.mqtt.publish.single(...)` sin bloque `tls`.
 - En ESP8266 (`config.example.h`) el default es `MQTT_PORT 1883`.
 
 ### Implicacion
@@ -92,7 +92,7 @@ Tabla rapida:
 - `ca.crt`: certificado publico de la CA. Se distribuye a clientes/broker para validar firmas.
 - `broker.key`: clave privada del broker Mosquitto.
 - `broker.crt`: certificado del broker firmado por la CA.
-- `client.key`: clave privada de un cliente (ej. `mqtt_client.py`).
+- `client.key`: clave privada de un cliente (ej. `mqtt_client.key` para el suscriptor).
 - `client.crt`: certificado del cliente firmado por la CA.
 - `*.csr`: Certificate Signing Request; solicitud de firma de certificado.
 - `ca.srl`: archivo de serial que OpenSSL usa al firmar multiples certificados.
@@ -332,7 +332,7 @@ Propuesta:
 
 ## Paso D - Cambios en clientes Python
 
-En `mqtt_client.py` y `sense_hat_client.py`:
+En `em_server/services/mqtt_service.py` y `em_server/services/sensehat_service.py`:
 
 ```python
 tls_cfg = cfg.get("tls", {})
@@ -351,7 +351,7 @@ Importante:
 - Si pones `true`, desactivas parte de la validacion del certificado y abres
   la puerta a MITM.
 
-En `app.py` para `mqtt_publish.single(...)`:
+En `em_server/routes/api.py` para `mqtt_publish.single(...)`:
 
 ```python
 tls = None

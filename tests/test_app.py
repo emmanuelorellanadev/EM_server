@@ -1,11 +1,35 @@
 """
-tests/test_app.py – Integration tests for the Flask web dashboard (app.py)
+tests/test_app.py – Integration tests for the Flask web dashboard (em_server.app)
 """
 import pytest
 
-# Patch database path before importing app
-import database
-import app as flask_app
+from em_server.app import create_app
+from em_server.models import database
+from em_server.routes import api as api_module
+
+# Default config used by the test client fixture.
+_TEST_CONFIG = {
+    "database": {"path": "placeholder"},
+    "mqtt": {
+        "broker": "localhost",
+        "port": 1883,
+        "username": "",
+        "password": "",
+        "topics": {
+            "cmd_esp8266": "commands/esp8266",
+            "cmd_esp32_01": "commands/esp32_01",
+        },
+    },
+    "web": {
+        "host": "0.0.0.0",
+        "port": 8080,
+        "debug": False,
+        "secret_key": "test-secret",
+        "display_timezone": "America/Guatemala",
+        "esp_panel_sources": ["esp8266", "esp32_01", "esp32_02"],
+        "default_trend_source": "esp8266",
+    },
+}
 
 
 @pytest.fixture()
@@ -13,12 +37,14 @@ def client(tmp_path, monkeypatch):
     db = str(tmp_path / "test.db")
     database.init_db(db)
 
-    monkeypatch.setattr(flask_app, "_db_path", db)
-    flask_app.app.config["TESTING"] = True
-    flask_app.app.secret_key = "test-secret"
+    config = dict(_TEST_CONFIG)
+    config["database"]["path"] = db
 
-    with flask_app.app.test_client() as c:
-        yield c, db
+    app = create_app(config)
+    app.config["TESTING"] = True
+
+    with app.test_client() as c:
+        yield c, db, app
 
 
 # ---------------------------------------------------------------------------
@@ -26,14 +52,14 @@ def client(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_index_empty(client):
-    c, _ = client
+    c, _, _ = client
     resp = c.get("/")
     assert resp.status_code == 200
     assert b"EM Server" in resp.data
 
 
 def test_index_with_data(client):
-    c, db = client
+    c, db, _ = client
     database.insert_reading(db, "esp8266", "temperature", 25.0, "°C")
     resp = c.get("/")
     assert resp.status_code == 200
@@ -41,14 +67,14 @@ def test_index_with_data(client):
 
 
 def test_history_empty(client):
-    c, _ = client
+    c, _, _ = client
     resp = c.get("/history")
     assert resp.status_code == 200
     assert b"Historial" in resp.data
 
 
 def test_history_with_filter(client):
-    c, db = client
+    c, db, _ = client
     database.insert_reading(db, "esp8266", "temperature", 25.0)
     resp = c.get("/history?source=esp8266&field=temperature&limit=50")
     assert resp.status_code == 200
@@ -59,14 +85,14 @@ def test_history_with_filter(client):
 # ---------------------------------------------------------------------------
 
 def test_api_latest_empty(client):
-    c, _ = client
+    c, _, _ = client
     resp = c.get("/api/latest")
     assert resp.status_code == 200
     assert resp.get_json() == []
 
 
 def test_api_latest_returns_data(client):
-    c, db = client
+    c, db, _ = client
     database.insert_reading(db, "esp8266", "humidity", 55.0, "%")
     resp = c.get("/api/latest")
     data = resp.get_json()
@@ -76,14 +102,14 @@ def test_api_latest_returns_data(client):
 
 
 def test_api_history_empty(client):
-    c, _ = client
+    c, _, _ = client
     resp = c.get("/api/history")
     assert resp.status_code == 200
     assert resp.get_json() == []
 
 
 def test_api_history_with_filter(client):
-    c, db = client
+    c, db, _ = client
     database.insert_reading(db, "esp8266", "temperature", 22.0)
     database.insert_reading(db, "raspberrypi", "temperature", 24.0)
     resp = c.get("/api/history?source=esp8266")
@@ -92,14 +118,14 @@ def test_api_history_with_filter(client):
 
 
 def test_api_sources_empty(client):
-    c, _ = client
+    c, _, _ = client
     resp = c.get("/api/sources")
     assert resp.status_code == 200
     assert resp.get_json() == []
 
 
 def test_api_sources_returns_sources(client):
-    c, db = client
+    c, db, _ = client
     database.insert_reading(db, "esp8266",     "temperature", 22.0)
     database.insert_reading(db, "raspberrypi", "humidity",    55.0)
     resp = c.get("/api/sources")
@@ -108,7 +134,7 @@ def test_api_sources_returns_sources(client):
 
 
 def test_api_trend_default_range(client):
-    c, db = client
+    c, db, _ = client
     database.insert_reading(db, "esp8266", "soil_humidity", 41.0, "%")
     database.insert_reading(db, "esp8266", "on_threshold_soil_vwc", 25.0, "%")
 
@@ -123,7 +149,7 @@ def test_api_trend_default_range(client):
 
 
 def test_api_trend_invalid_range_returns_400(client):
-    c, _ = client
+    c, _, _ = client
     resp = c.get("/api/trend?range=invalido")
     assert resp.status_code == 400
     body = resp.get_json()
@@ -132,7 +158,7 @@ def test_api_trend_invalid_range_returns_400(client):
 
 
 def test_api_trend_filters_by_source(client):
-    c, db = client
+    c, db, _ = client
     database.insert_reading(db, "esp8266", "soil_humidity", 40.0, "%")
     database.insert_reading(db, "esp8266", "on_threshold_soil_vwc", 25.0, "%")
     database.insert_reading(db, "raspberrypi", "soil_humidity", 99.0, "%")
@@ -146,7 +172,7 @@ def test_api_trend_filters_by_source(client):
 
 
 def test_api_trend_supports_1d_range(client):
-    c, db = client
+    c, db, _ = client
     database.insert_reading(db, "esp8266", "soil_humidity", 52.0, "%")
     database.insert_reading(db, "esp8266", "on_threshold_soil_vwc", 25.0, "%")
 
@@ -162,7 +188,7 @@ def test_api_trend_supports_1d_range(client):
 # ---------------------------------------------------------------------------
 
 def test_index_shows_watering_status(client):
-    c, db = client
+    c, db, _ = client
     database.insert_reading(db, "esp8266", "watering", 1.0)
     resp = c.get("/")
     assert resp.status_code == 200
@@ -170,7 +196,7 @@ def test_index_shows_watering_status(client):
 
 
 def test_index_shows_online_status(client):
-    c, db = client
+    c, db, _ = client
     database.insert_reading(db, "esp8266", "online", 1.0)
     resp = c.get("/")
     assert resp.status_code == 200
@@ -179,7 +205,7 @@ def test_index_shows_online_status(client):
 
 
 def test_api_latest_includes_boolean_fields(client):
-    c, db = client
+    c, db, _ = client
     database.insert_reading(db, "esp8266", "watering", 0.0)
     database.insert_reading(db, "esp8266", "online", 1.0)
     database.insert_reading(db, "esp8266", "cooldown", 1.0)
@@ -196,10 +222,10 @@ def test_api_latest_includes_boolean_fields(client):
 # Remote watering command — POST /api/command/water
 # ---------------------------------------------------------------------------
 
-def test_api_command_water_no_config(client, monkeypatch):
-    """Returns 503 when no MQTT config is loaded (empty _config)."""
-    c, _ = client
-    monkeypatch.setattr(flask_app, "_config", {})  # explicit empty config
+def test_api_command_water_no_config(client):
+    """Returns 503 when no MQTT config is available on the app."""
+    c, _, app = client
+    app.config["EM_MQTT_CONFIG"] = None
     resp = c.post("/api/command/water")
     assert resp.status_code == 503
     assert resp.get_json()["error"] == "MQTT not configured"
@@ -207,18 +233,16 @@ def test_api_command_water_no_config(client, monkeypatch):
 
 def test_api_command_water_publishes(client, monkeypatch):
     """Returns 200 and calls the MQTT publish helper with the correct arguments."""
-    c, _ = client
-    monkeypatch.setattr(flask_app, "_config", {
-        "mqtt": {
-            "broker": "localhost",
-            "port": 1883,
-            "username": "",
-            "password": "",
-            "topics": {"cmd_esp8266": "commands/esp8266"},
-        }
-    })
+    c, _, app = client
+    app.config["EM_MQTT_CONFIG"] = {
+        "broker": "localhost",
+        "port": 1883,
+        "username": "",
+        "password": "",
+        "topics": {"cmd_esp8266": "commands/esp8266"},
+    }
     published = []
-    monkeypatch.setattr(flask_app, "_mqtt_publish_command",
+    monkeypatch.setattr(api_module, "_mqtt_publish_command",
                         lambda cfg, topic, payload: published.append((topic, payload)))
 
     resp = c.post("/api/command/water")
@@ -232,21 +256,19 @@ def test_api_command_water_publishes(client, monkeypatch):
 
 def test_api_command_water_broker_error(client, monkeypatch):
     """Returns 502 with a generic error message when the MQTT broker is unreachable."""
-    c, _ = client
-    monkeypatch.setattr(flask_app, "_config", {
-        "mqtt": {
-            "broker": "unreachable-host",
-            "port": 1883,
-            "username": "",
-            "password": "",
-            "topics": {"cmd_esp8266": "commands/esp8266"},
-        }
-    })
+    c, _, app = client
+    app.config["EM_MQTT_CONFIG"] = {
+        "broker": "unreachable-host",
+        "port": 1883,
+        "username": "",
+        "password": "",
+        "topics": {"cmd_esp8266": "commands/esp8266"},
+    }
 
     def _fail(*args, **kwargs):
         raise ConnectionRefusedError("broker offline")
 
-    monkeypatch.setattr(flask_app, "_mqtt_publish_command", _fail)
+    monkeypatch.setattr(api_module, "_mqtt_publish_command", _fail)
 
     resp = c.post("/api/command/water")
     assert resp.status_code == 502
@@ -259,21 +281,19 @@ def test_api_command_water_broker_error(client, monkeypatch):
 
 def test_api_command_water_esp32_topic(client, monkeypatch):
     """Publishes watering command to esp32_01 topic when requested."""
-    c, _ = client
-    monkeypatch.setattr(flask_app, "_config", {
-        "mqtt": {
-            "broker": "localhost",
-            "port": 1883,
-            "username": "",
-            "password": "",
-            "topics": {
-                "cmd_esp8266": "commands/esp8266",
-                "cmd_esp32_01": "commands/esp32_01",
-            },
-        }
-    })
+    c, _, app = client
+    app.config["EM_MQTT_CONFIG"] = {
+        "broker": "localhost",
+        "port": 1883,
+        "username": "",
+        "password": "",
+        "topics": {
+            "cmd_esp8266": "commands/esp8266",
+            "cmd_esp32_01": "commands/esp32_01",
+        },
+    }
     published = []
-    monkeypatch.setattr(flask_app, "_mqtt_publish_command",
+    monkeypatch.setattr(api_module, "_mqtt_publish_command",
                         lambda cfg, topic, payload: published.append((topic, payload)))
 
     resp = c.post("/api/command/water", json={"source": "esp32_01"})
@@ -287,7 +307,7 @@ def test_api_command_water_esp32_topic(client, monkeypatch):
 
 def test_index_renders_esp32_panel(client):
     """ESP32 panel should render irrigation controls and Atmosfera card."""
-    c, db = client
+    c, db, _ = client
     database.insert_reading(db, "esp32_01", "soil_humidity", 44.0, "%")
     database.insert_reading(db, "esp32_01", "ambient_temperature", 24.8, "°C")
     database.insert_reading(db, "esp32_01", "ambient_humidity", 59.0, "%")
@@ -305,7 +325,7 @@ def test_index_renders_esp32_panel(client):
 
 def test_index_trend_label_placeholder_present(client):
     """Trend title includes source label placeholder for active ESP panel."""
-    c, _ = client
+    c, _, _ = client
     resp = c.get("/")
     assert resp.status_code == 200
     assert b'id="trend-source-label"' in resp.data
@@ -313,7 +333,7 @@ def test_index_trend_label_placeholder_present(client):
 
 def test_api_trend_raspberrypi_fields(client):
     """Raspberry Pi trend endpoint returns separate datasets by environmental field."""
-    c, db = client
+    c, db, _ = client
     database.insert_reading(db, "raspberrypi", "temperature", 22.5, "°C")
     database.insert_reading(db, "raspberrypi", "humidity", 58.1, "%")
     database.insert_reading(db, "raspberrypi", "pressure", 1012.0, "hPa")
@@ -330,7 +350,7 @@ def test_api_trend_raspberrypi_fields(client):
 
 def test_api_trend_esp32_includes_environmental_fields(client):
     """ESP32 trend endpoint returns soil and environmental datasets."""
-    c, db = client
+    c, db, _ = client
     database.insert_reading(db, "esp32_01", "soil_humidity", 45.0, "%")
     database.insert_reading(db, "esp32_01", "on_threshold_soil_vwc", 60.0, "%")
     database.insert_reading(db, "esp32_01", "ambient_temperature", 25.2, "°C")

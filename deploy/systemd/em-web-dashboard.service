@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=pi
 WorkingDirectory=/home/pi/EM_server
-ExecStart=/home/pi/EM_server/venv/bin/python app.py --config config.json
+ExecStart=/home/pi/EM_server/venv/bin/python -m em_server --config config.json
 Restart=on-failure
 RestartSec=10
 

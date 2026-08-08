@@ -12,8 +12,8 @@
       <h1>🌱 EM Server</h1>
       <p class="subtitle">Monitoreo Meteorológico de Sensores IoT</p>
       <nav>
-        <a href="{{ url_for('index') }}" {% if request.endpoint == 'index' %}class="active"{% endif %}>Dashboard</a>
-        <a href="{{ url_for('history') }}" {% if request.endpoint == 'history' %}class="active"{% endif %}>Historial</a>
+        <a href="{{ url_for('dashboard.index') }}" {% if request.endpoint == 'dashboard.index' %}class="active"{% endif %}>Dashboard</a>
+        <a href="{{ url_for('dashboard.history') }}" {% if request.endpoint == 'dashboard.history' %}class="active"{% endif %}>Historial</a>
       </nav>
     </div>
   </header>

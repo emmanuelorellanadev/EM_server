@@ -118,7 +118,7 @@ En el firmware del nuevo nodo (`config.h`):
 - `MQTT_TOPICO_CMD = "commands/esp32_02"`
 - `MQTT_STATUS_TOPIC = "devices/esp32_02/status"`
 
-En el servidor (`config.json` de `mqtt_client.py`):
+En el servidor (`config.json` de `em_server/services/mqtt_service.py`):
 - Registrar los topics del nuevo nodo
 - Agregar `field_mappings` si es necesario
 

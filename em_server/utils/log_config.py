@@ -4,7 +4,7 @@ Creates the ``logs/`` directory if missing and configures the root logger
 with both a console handler and a rotating file handler (``logs/em_server.log``).
 
 Usage:
-    from logging_setup import setup_logging
+    from em_server.utils.log_config import setup_logging
     logger = setup_logging("app")
 """
 
@@ -22,7 +22,7 @@ def setup_logging(logger_name: str, level: int = logging.INFO) -> logging.Logger
     """Configure the root logger once and return a named logger.
 
     Args:
-        logger_name: Name for the returned logger (e.g. "app", "mqtt_client").
+        logger_name: Name for the returned logger (e.g. "app", "mqtt_service").
         level:       Minimum level logged to both console and file.
 
     Returns:

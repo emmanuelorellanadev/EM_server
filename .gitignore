@@ -25,7 +25,10 @@ logs/
 .env
 
 # ESP32 local configuration (contains Wi-Fi credentials – never commit)
-esp32/config.h
+firmware/esp32/config.h
+
+# ESP8266 local configuration (contains Wi-Fi credentials – never commit)
+firmware/esp8266/config.h
 
 # IDE
 .vscode/

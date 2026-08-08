@@ -1,4 +1,4 @@
-"""MQTT subscriber service.
+"""MQTT subscriber service for EM_server.
 
 Flow:
 1) Subscribe to sensor and status topics.
@@ -7,7 +7,7 @@ Flow:
 4) Persist readings in SQLite.
 
 Run:
-    python mqtt_client.py [--config config.json]
+    python -m em_server.services.mqtt_service [--config config.json]
 """
 
 import argparse
@@ -17,17 +17,13 @@ import time
 
 import paho.mqtt.client as mqtt
 
-from database import init_db, insert_reading, insert_readings_from_payload
-from logging_setup import setup_logging
+from em_server.config import load_config
+from em_server.models.database import init_db, insert_reading, insert_readings_from_payload
+from em_server.utils.log_config import setup_logging
 
-logger = setup_logging("mqtt_client")
+logger = setup_logging("mqtt_service")
 
 _running = True
-
-
-def _load_config(path: str) -> dict:
-    with open(path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
 
 
 def _on_connect(client, userdata, flags, rc):
@@ -156,7 +152,7 @@ def build_client(config: dict, db_path: str) -> mqtt.Client:
 
 def run(config_path: str = "config.json") -> None:
     global _running
-    config = _load_config(config_path)
+    config = load_config(config_path)
     db_path = config["database"]["path"]
     init_db(db_path)
     logger.info("Database initialised at %s", db_path)

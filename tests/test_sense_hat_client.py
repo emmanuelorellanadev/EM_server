@@ -1,5 +1,5 @@
 """
-tests/test_sense_hat_client.py -- Unit tests for sense_hat_client.py
+tests/test_sense_hat_client.py -- Unit tests for sensehat_service.py
 """
 
 import math
@@ -8,11 +8,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# Mock sense_hat before importing sense_hat_client (hardware-dependent lib).
+# Mock sense_hat before importing sensehat_service (hardware-dependent lib).
 sense_hat_mock = MagicMock()
 sys.modules["sense_hat"] = sense_hat_mock
 
-from sense_hat_client import (
+from em_server.services.sensehat_service import (
     _read_sense_hat,
     _read_sense_hat_with_guardrails,
 )

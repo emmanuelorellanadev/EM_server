@@ -1,10 +1,10 @@
-"""Sense HAT MQTT publisher.
+"""Sense HAT MQTT publisher for EM_server.
 
 Publishes temperature, humidity, and pressure from Sense HAT.
 Temperature uses guardrails to reduce startup/outlier readings.
 
 Run:
-    python sense_hat_client.py [--config config.json]
+    python -m em_server.services.sensehat_service [--config config.json]
 """
 
 import argparse
@@ -18,16 +18,12 @@ from typing import Optional
 import paho.mqtt.client as mqtt
 from sense_hat import SenseHat
 
-from logging_setup import setup_logging
+from em_server.config import load_config
+from em_server.utils.log_config import setup_logging
 
-logger = setup_logging("sense_hat_client")
+logger = setup_logging("sensehat_service")
 
 _running = True
-
-
-def _load_config(path: str) -> dict:
-    with open(path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
 
 
 def _on_connect(client, userdata, flags, rc):
@@ -109,7 +105,7 @@ def _read_sense_hat_with_guardrails(
 
 def run(config_path: str = "config.json") -> None:
     global _running
-    config = _load_config(config_path)
+    config = load_config(config_path)
     mqtt_cfg = config["mqtt"]
     sh_cfg = config["sense_hat"]
     topic = sh_cfg["topic"]

@@ -42,8 +42,8 @@ Integra dos fuentes de datos:
 │                            subscribe (sensors/#)      │
 │                                         ▼             │
 │                               ┌──────────────────┐   │
-│                               │  mqtt_client.py  │   │
-│                               │  (suscriptor)    │   │
+│                               │ mqtt_service.py  │   │
+│                               │ (suscriptor)     │   │
 │                               └────────┬─────────┘   │
 │                                        │ INSERT       │
 │                                        ▼             │
@@ -55,7 +55,7 @@ Integra dos fuentes de datos:
 │                                        ▼             │
 │                               ┌──────────────────┐   │
 │                               │  Flask Dashboard  │   │
-│                               │  app.py  :8080    │   │
+│                               │  em_server :8080  │   │
 │                               └──────────────────┘   │
 └──────────────────────────────────────────────────────┘
 ```
@@ -76,7 +76,7 @@ La Raspberry Pi actúa como **servidor central**. El Sense HAT v1 mide:
 
 > **Nota:** El sensor de temperatura del Sense HAT puede leer ~5 °C por encima
 > de la temperatura real debido al calor de la CPU.  Ajusta `CPU_TEMP_CORRECTION`
-> en `sense_hat_client.py` según tu instalación.
+> en `em_server/services/sensehat_service.py` según tu instalación.
 
 #### ESP8266 NodeMCU V3 (invernadero)
 
@@ -146,10 +146,10 @@ publicarMQTT()          ← publica payload agregado
       │
       ▼
 mqtt.publish()          ─────────────────────────────────────────►
-                                                                   │
-                                                          mqtt_client.py
-                                                                   │
-                                                          field mappings    ← normaliza campos por fuente
+                                                                    │
+                                                           mqtt_service.py
+                                                                    │
+                                                           field mappings    ← normaliza campos por fuente
                                                                    │
                                                           insert_readings_from_payload()
                                                                    │
@@ -160,7 +160,7 @@ mqtt.publish()          ──────────────────�
 
 #### Payload MQTT del ESP8266 (histórico)
 
-> **Nota:** El firmware del ESP8266 (`esp8266/humedadSueloK8/`) fue reemplazado por el firmware del ESP32 (`esp32/esp32.ino`).
+> **Nota:** El firmware del ESP8266 (`firmware/esp8266/`) fue reemplazado por el firmware del ESP32 (`firmware/esp32/esp32.ino`).
 > Esta sección se conserva como referencia para quienes aún usen el ESP8266 original.
 
 El ESP publica en `sensors/<nodo>` en ventanas de agregacion (configurable):
@@ -246,18 +246,42 @@ humedad < UMBRAL_RIEGO (30%)  AND  !cooldown
 ```
 EM_server/
 ├── config.json              # Configuración central (MQTT, DB, Web, field_mappings)
-├── requirements.txt         # Dependencias Python
-├── setup.sh                 # Script de instalación automática (Raspbian)
+├── requirements.txt         # Dependencias Python de producción
+├── requirements-dev.txt     # Dependencias de desarrollo (pytest, ruff)
+├── pyproject.toml           # Configuración del paquete Python
 │
-├── database.py              # Capa de acceso a SQLite
-├── mqtt_client.py           # Servicio suscriptor MQTT → DB (con field_mappings)
-├── sense_hat_client.py      # Publicador de datos del Sense HAT → MQTT
-├── app.py                   # Dashboard web Flask
+├── em_server/               # Paquete principal de Python
+│   ├── __main__.py          # Punto de entrada: python -m em_server
+│   ├── app.py               # Factory de la app Flask (create_app)
+│   ├── config.py            # Carga centralizada de config.json
+│   ├── models/
+│   │   └── database.py      # Capa de acceso a SQLite
+│   ├── services/
+│   │   ├── mqtt_service.py      # Suscriptor MQTT → DB (con field_mappings)
+│   │   └── sensehat_service.py  # Publicador de datos del Sense HAT → MQTT
+│   ├── routes/
+│   │   ├── dashboard.py     # Rutas HTML (/, /history)
+│   │   └── api.py           # Rutas JSON (/api/*) y comando de riego
+│   └── utils/
+│       ├── log_config.py    # Configuración de logging
+│       └── formatters.py    # Formateo de datos y metadata de campos
 │
-├── esp32/
-│   ├── esp32.ino            # Sketch Arduino completo
-│   ├── config.example.h     # Plantilla de configuración
-│   └── CONFIGURACION.md     # Guía de configuración
+├── firmware/                # Código Arduino (microcontroladores)
+│   ├── esp32/
+│   │   ├── esp32.ino            # Sketch Arduino completo
+│   │   ├── config.example.h     # Plantilla de configuración
+│   │   └── CONFIGURACION.md     # Guía de configuración
+│   └── esp8266/
+│       ├── humedadSueloK8.ino
+│       ├── config.example.h
+│       └── CONFIGURACION.md
+│
+├── deploy/
+│   ├── setup.sh             # Script de instalación automática (Raspbian)
+│   └── systemd/
+│       ├── em-mqtt-client.service
+│       ├── em-sensehat-client.service
+│       └── em-web-dashboard.service
 │
 ├── templates/
 │   ├── base.html            # Plantilla base
@@ -268,15 +292,11 @@ EM_server/
 │   ├── css/style.css        # Estilos del dashboard
 │   └── js/dashboard.js      # Gráficas (Chart.js) y refresco manual
 │
-├── systemd/
-│   ├── em-mqtt-client.service
-│   ├── em-sensehat-client.service
-│   └── em-web-dashboard.service
-│
 └── tests/
     ├── test_database.py
     ├── test_app.py
-    └── test_mqtt_client.py
+    ├── test_mqtt_client.py
+    └── test_sense_hat_client.py
 ```
 
 ---
@@ -291,7 +311,7 @@ cd /home/pi/EM_server
 # 2. (Opcional) Ajusta config.json con la IP del broker y credenciales
 
 # 3. Ejecuta el script de instalación como root
-sudo bash setup.sh
+sudo bash deploy/setup.sh
 ```
 
 El script:
@@ -324,13 +344,13 @@ pip install -r requirements.txt
 
 ```bash
 # Suscriptor MQTT (almacena en SQLite)
-python mqtt_client.py --config config.json
+python -m em_server.services.mqtt_service --config config.json
 
 # Publicador Sense HAT
-python sense_hat_client.py --config config.json
+python -m em_server.services.sensehat_service --config config.json
 
 # Dashboard web
-python app.py --config config.json
+python -m em_server --config config.json
 ```
 
 Abre `http://<IP_de_la_Raspberry>:8080` en el navegador.
@@ -341,8 +361,8 @@ Abre `http://<IP_de_la_Raspberry>:8080` en el navegador.
 
 ```bash
 # 1. Copia la plantilla de configuración
-cp esp32/config.example.h \
-   esp32/config.h
+cp firmware/esp32/config.example.h \
+   firmware/esp32/config.h
 
 # 2. Edita config.h con tu red Wi-Fi, IP del broker y calibración
 
@@ -373,7 +393,7 @@ El nodo publica presencia en `devices/<nodo>/status` (`online`/`offline`) con LW
 | `mqtt.client_id_sensehat` | Client ID del publicador Sense HAT | `em_server_sensehat` |
 | `mqtt.topics.all` | Tópico wildcard de suscripción | `sensors/#` |
 | `mqtt.topics.device_status` | Tópico wildcard de presencia de dispositivos | `devices/+/status` |
-| `database.path` | Ruta del archivo SQLite | `em_server.db` |
+| `database.path` | Ruta del archivo SQLite | `em_db/em_server.db` |
 | `web.host` | Interfaz de red del servidor Flask | `0.0.0.0` |
 | `web.port` | Puerto del dashboard Flask | `8080` |
 | `web.debug` | Modo debug de Flask | `false` |

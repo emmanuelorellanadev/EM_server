@@ -1,10 +1,10 @@
 """
-tests/test_database.py – Unit tests for database.py
+tests/test_database.py – Unit tests for em_server/models/database.py
 """
 import os
 import pytest
 
-from database import (
+from em_server.models.database import (
     init_db,
     insert_reading,
     insert_readings_from_payload,

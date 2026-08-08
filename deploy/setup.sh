@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # setup.sh – Installs and configures EM Server on Raspbian
-# Usage: sudo bash setup.sh
+# Usage: sudo bash deploy/setup.sh
 
 set -euo pipefail
 
 # Allow overrides via environment variables:
-#   sudo SERVICE_USER=bitspi EM_DIR=/home/bitspi/Development/EM/EM_server bash setup.sh
+#   sudo SERVICE_USER=bitspi EM_DIR=/home/bitspi/Development/EM/EM_server bash deploy/setup.sh
 DEFAULT_SERVICE_USER="${SUDO_USER:-${USER}}"
 SERVICE_USER="${SERVICE_USER:-$DEFAULT_SERVICE_USER}"
 
+# EM_DIR is the repository root; this script lives in EM_DIR/deploy/.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_EM_DIR="/home/$SERVICE_USER/Development/EM/EM_server"
 LEGACY_EM_DIR="/home/$SERVICE_USER/EM_server"
 
@@ -18,7 +20,7 @@ if [ -z "${EM_DIR:-}" ]; then
     elif [ -d "$LEGACY_EM_DIR" ]; then
         EM_DIR="$LEGACY_EM_DIR"
     else
-        EM_DIR="$(pwd)"
+        EM_DIR="$(dirname "$SCRIPT_DIR")"
     fi
 fi
 
@@ -35,8 +37,8 @@ if [ ! -f "$EM_DIR/requirements.txt" ]; then
     exit 1
 fi
 
-if [ ! -d "$EM_DIR/systemd" ]; then
-    echo "ERROR: No se encontro carpeta systemd en: $EM_DIR"
+if [ ! -d "$EM_DIR/deploy/systemd" ]; then
+    echo "ERROR: No se encontro carpeta deploy/systemd en: $EM_DIR"
     exit 1
 fi
 
@@ -95,9 +97,9 @@ install_service_from_template() {
         "$template_path" > "$target_path"
 }
 
-install_service_from_template "$EM_DIR/systemd/em-mqtt-client.service"
-install_service_from_template "$EM_DIR/systemd/em-web-dashboard.service"
-install_service_from_template "$EM_DIR/systemd/em-sensehat-client.service"
+install_service_from_template "$EM_DIR/deploy/systemd/em-mqtt-client.service"
+install_service_from_template "$EM_DIR/deploy/systemd/em-web-dashboard.service"
+install_service_from_template "$EM_DIR/deploy/systemd/em-sensehat-client.service"
 
 systemctl daemon-reload
 systemctl enable em-mqtt-client em-web-dashboard em-sensehat-client

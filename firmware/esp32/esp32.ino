@@ -579,9 +579,14 @@ bool publicarMQTT() {
 #endif
   json += "}";
 
-  bool publicado = mqtt.publish(MQTT_TOPICO, json.c_str());
+#if CONFIG_MODE
+  const char* publishTopic = MQTT_DEBUG_TOPIC;
+#else
+  const char* publishTopic = MQTT_TOPICO;
+#endif
+  bool publicado = mqtt.publish(publishTopic, json.c_str());
   Serial.printf("[MQTT] Publicado en %s: %s (%s)\n",
-                MQTT_TOPICO, json.c_str(), publicado ? "OK" : "FALLO");
+                publishTopic, json.c_str(), publicado ? "OK" : "FALLO");
   if (!publicado) {
     return false;
   }
@@ -593,6 +598,9 @@ bool publicarMQTT() {
 void setup() {
   Serial.begin(115200);
   Serial.println("\n[INICIO] humedadSueloK8");
+#if CONFIG_MODE
+  Serial.println("[CONFIG] Modo configuración ACTIVO — datos van a topic de debug, NO a BD.");
+#endif
 
   analogReadResolution(12);
   analogSetPinAttenuation(PIN_AO, ADC_11db);
@@ -629,10 +637,12 @@ void setup() {
     Serial.println("[WIFI] Timeout inicial. El loop seguira reintentando.");
   }
 
+#if CONFIG_MODE
   server.on("/",     handleRoot);
   server.on("/json", handleJson);
   server.begin();
   Serial.println("[WEB] Servidor iniciado en puerto 80");
+#endif
 
   captureAggregationSample();
   lastControlSampleMs = millis();
@@ -676,7 +686,9 @@ void setup() {
 }
 
 void loop() {
+#if CONFIG_MODE
   server.handleClient();
+#endif
 
   if (strlen(MQTT_SERVER) > 0) {
     ensureWiFiConnected();

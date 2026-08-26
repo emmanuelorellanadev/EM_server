@@ -373,6 +373,20 @@ cp firmware/esp32/config.example.h \
 #    Compila y sube
 ```
 
+Cableado del ESP32 (DevKit):
+
+| Señal | GPIO | Nota |
+|---|---|---|
+| AO sensor de suelo (K8/C11) | 34 (D34) | ADC1_CH6, lectura analógica |
+| DO sensor de suelo (opcional) | 36 | solo informativo |
+| LDR | 35 (D35) | ADC1_CH7, lectura analógica |
+| DHT22 (temp./humedad) | 27 (D27) | lectura digital |
+| Relé (active-high) | 12 (D12) | salida digital |
+
+> El sensor de suelo debe conectarse a un pin ADC1 (GPIO 32-39). Los pines
+> ADC2 devuelven `0` mientras el WiFi está activo. Tras el cambio de pin,
+> recalibra `RAW_DRY` / `RAW_WET` (el ADC del ESP32 es de 12 bits, 0-4095).
+
 El ESP publica telemetria agregada segun:
 - `AGGREGATION_SAMPLE_MS`
 - `MQTT_PUBLISH_INTERVAL_MS`

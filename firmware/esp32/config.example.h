@@ -37,8 +37,10 @@
 #define PIN_DO 36
 
 // PIN_AO: pin analógico del sensor de suelo.
-// Usar ADC1 (GPIO 32-39) para evitar conflicto con WiFi (ADC2).
-#define PIN_AO 13
+// GPIO 34 = ADC1_CH6 (D34). Debe ser ADC1 (GPIO 32-39): los pines ADC2
+// devuelven 0 mientras el WiFi está activo.
+// Cableado: AO del sensor K8/C11 → D34.
+#define PIN_AO 34
 
 // ── Relé ────────────────────────────────────────────────────────
 // El relé es un interruptor electromecánico que permite al
@@ -89,8 +91,8 @@
 //
 // ⚠ Los valores aquí son de EJEMPLO. Tu sensor puede dar valores
 //   diferentes. Usar valores incorrectos produce lecturas erróneas.
-#define RAW_DRY 571   // ADC con sensor seco (en aire)
-#define RAW_WET 336   // ADC con sensor húmedo (en agua)
+#define RAW_DRY 3130   // ADC con sensor seco (en aire)
+#define RAW_WET 1075   // ADC con sensor húmedo (en agua)
 
 // ── Sensor de luz LDR ──────────────────────────────────────────
 // El LDR con pulldown de 10K funciona al revés del sensor de suelo:
@@ -143,8 +145,8 @@
 // Más muestras = más estable pero más lento.
 #define ANALOG_SAMPLES   20    // Lecturas ADC por muestra (suelo + luz)
 #define ANALOG_DELAY_MS   5    // ms entre lecturas ADC
-#define AMBIENT_SAMPLES   5    // Lecturas DHT por muestra
-#define AMBIENT_DELAY_MS  250  // ms entre lecturas DHT
+#define AMBIENT_SAMPLES   1    // Lecturas DHT por muestra
+#define AMBIENT_DELAY_MS  0  // ms entre lecturas DHT
 
 // ================================================================
 // Temporizadores de muestreo y publicación MQTT
@@ -170,9 +172,29 @@
 //
 // Ejemplo con ventana de 6 muestras, muestra cada 30 s, publica cada 3 min:
 #define CONTROL_SAMPLE_MS        10000UL
-#define AGGREGATION_SAMPLE_MS   300000UL   // cada 5 min se captura una muestra
-#define MQTT_PUBLISH_INTERVAL_MS 1800000UL // cada 30 min se publica el promedio
-#define MQTT_WINDOW_SAMPLE_COUNT 6         // 1800000 / 300000 = 6 muestras por ventana
+#define AGGREGATION_SAMPLE_MS   30000UL    // cada 30 s se captura una muestra
+#define MQTT_PUBLISH_INTERVAL_MS 180000UL  // cada 3 min se publica el promedio
+#define MQTT_WINDOW_SAMPLE_COUNT 6         // 180000 / 30000 = 6 muestras por ventana
+
+// ================================================================
+// Modo configuración
+// ================================================================
+// CONFIG_MODE = 1 → publica MQTT a topic de debug (no guarda en BD del servidor)
+// CONFIG_MODE = 0 → producción: publica al topic normal (sensors/...)
+//
+// Cuando CONFIG_MODE está activo, el ESP32 sigue publicando por MQTT
+// y mostrando datos en el Monitor Serie, pero el servidor NO guarda
+// esos datos en la base de datos porque no está suscrito al topic
+// de debug.
+//
+// Para monitorear datos en modo debug:
+//   mosquitto_sub -h localhost -t "debug/#"
+#define CONFIG_MODE 0
+
+// Topic de debug (solo se usa cuando CONFIG_MODE = 1).
+// Debe ser diferente al topic normal (sensors/...) para que el
+// servidor no lo reciba ni lo guarde.
+#define MQTT_DEBUG_TOPIC "debug/esp32_01"
 
 // ================================================================
 // Tiempos de reconexión

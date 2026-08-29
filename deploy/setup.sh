@@ -70,14 +70,22 @@ echo "      Instalando dependencias Python..."
 "$VENV/bin/pip" install --quiet --upgrade pip
 "$VENV/bin/pip" install --quiet -r "$EM_DIR/requirements.txt"
 
-# ---- 4. Generate a random secret key in config.json --------------------
+# ---- 4. Generate config.json from template ---------------------------------
 echo ""
 echo "[4/6] Configurando config.json..."
 SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 CONFIG="$EM_DIR/config.json"
+CONFIG_EXAMPLE="$EM_DIR/config.example.json"
+
+if [ ! -f "$CONFIG" ] && [ -f "$CONFIG_EXAMPLE" ]; then
+    cp "$CONFIG_EXAMPLE" "$CONFIG"
+    echo "      config.json creado desde config.example.json"
+fi
+
 if [ -f "$CONFIG" ]; then
-    # Replace the placeholder secret key
+    # Replace the placeholder secret key (supports both old and new placeholders)
     sed -i "s/change-this-secret-key-in-production/$SECRET/g" "$CONFIG"
+    sed -i "s/CHANGE_THIS_IN_PRODUCTION/$SECRET/g" "$CONFIG"
     echo "      Secret key generado y guardado."
 else
     echo "      ADVERTENCIA: $CONFIG no encontrado. Crea el archivo manualmente."

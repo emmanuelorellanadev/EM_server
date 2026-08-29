@@ -245,15 +245,16 @@ humedad < UMBRAL_RIEGO (30%)  AND  !cooldown
 
 ```
 EM_server/
-├── config.json              # Configuración central (MQTT, DB, Web, field_mappings)
-├── requirements.txt         # Dependencias Python de producción
-├── requirements-dev.txt     # Dependencias de desarrollo (pytest, ruff)
-├── pyproject.toml           # Configuración del paquete Python
+├── config.example.json        # Plantilla de configuración (segura para git)
+├── config.json                # Configuración local (NO se sube al repo)
+├── requirements.txt           # Dependencias Python de producción
+├── requirements-dev.txt       # Dependencias de desarrollo (pytest, ruff)
+├── pyproject.toml             # Configuración del paquete Python
 │
 ├── em_server/               # Paquete principal de Python
 │   ├── __main__.py          # Punto de entrada: python -m em_server
 │   ├── app.py               # Factory de la app Flask (create_app)
-│   ├── config.py            # Carga centralizada de config.json
+│   ├── config.py            # Carga centralizada de config.json (con env vars)
 │   ├── models/
 │   │   └── database.py      # Capa de acceso a SQLite
 │   ├── services/
@@ -308,7 +309,9 @@ EM_server/
 git clone https://github.com/emmanuelorellanadev/EM_server.git /home/pi/EM_server
 cd /home/pi/EM_server
 
-# 2. (Opcional) Ajusta config.json con la IP del broker y credenciales
+# 2. (Opcional) Crea config.json desde la plantilla y edítalo
+cp config.example.json config.json
+# Editar config.json con la IP del broker y credenciales
 
 # 3. Ejecuta el script de instalación como root
 sudo bash deploy/setup.sh
@@ -317,7 +320,7 @@ sudo bash deploy/setup.sh
 El script:
 1. Instala Mosquitto, Python 3 y python3-sense-hat
 2. Crea un entorno virtual Python con todas las dependencias
-3. Genera una clave secreta Flask aleatoria
+3. Copia `config.example.json` → `config.json` si no existe y genera una clave secreta
 4. Habilita los tres servicios systemd para arranque automático
 
 ---
@@ -340,7 +343,14 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Iniciar servicios
+### 3. Configurar
+
+```bash
+cp config.example.json config.json
+# Editar config.json con la IP del broker y credenciales
+```
+
+### 4. Iniciar servicios
 
 ```bash
 # Suscriptor MQTT (almacena en SQLite)
@@ -396,7 +406,25 @@ El nodo publica presencia en `devices/<nodo>/status` (`online`/`offline`) con LW
 
 ---
 
-## Configuración (config.json)
+## Configuración
+
+La configuración se carga desde `config.json`. Los valores pueden ser
+sobreescritos por variables de entorno (útil en producción):
+
+| Variable de entorno | Sección en JSON | Descripción |
+|---|---|---|
+| `EM_MQTT_BROKER` | `mqtt.broker` | Dirección del broker MQTT |
+| `EM_MQTT_PORT` | `mqtt.port` | Puerto del broker |
+| `EM_MQTT_USERNAME` | `mqtt.username` | Usuario MQTT |
+| `EM_MQTT_PASSWORD` | `mqtt.password` | Contraseña MQTT |
+| `EM_SECRET_KEY` | `web.secret_key` | Clave secreta Flask |
+| `EM_WEB_HOST` | `web.host` | Interfaz de red |
+| `EM_WEB_PORT` | `web.port` | Puerto del dashboard |
+| `EM_WEB_DEBUG` | `web.debug` | Modo debug |
+| `EM_DB_PATH` | `database.path` | Ruta de SQLite |
+| `EM_API_KEY` | `web.api_key` | API key para autenticación |
+
+### Parámetros de config.json
 
 | Clave | Descripción | Default |
 |---|---|---|
@@ -411,7 +439,7 @@ El nodo publica presencia en `devices/<nodo>/status` (`online`/`offline`) con LW
 | `web.host` | Interfaz de red del servidor Flask | `0.0.0.0` |
 | `web.port` | Puerto del dashboard Flask | `8080` |
 | `web.debug` | Modo debug de Flask | `false` |
-| `web.secret_key` | Clave secreta para sesiones Flask | `change-this-secret-key-in-production` |
+| `web.secret_key` | Clave secreta para sesiones Flask | `CHANGE_THIS_IN_PRODUCTION` |
 | `sense_hat.topic` | Tópico MQTT del Sense HAT | `sensors/raspberrypi` |
 | `sense_hat.publish_interval_seconds` | Intervalo de publicación del Sense HAT | `30` |
 | `sense_hat.cpu_temp_correction` | Corrección por calor de CPU (°C) | `5.0` |

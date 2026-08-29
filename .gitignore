@@ -6,9 +6,21 @@ __pycache__/
 .Python
 venv/
 .venv/
+__pypackages__/
 *.egg-info/
 dist/
 build/
+
+# Testing / Quality
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+
+# Type checking / Linting
+.mypy_cache/
+.ruff_cache/
 
 # Database files
 *.db
@@ -23,6 +35,19 @@ logs/
 
 # Environment / secrets
 .env
+.env.*
+!.env.example
+
+# Configuración del servidor (contiene secretos)
+config.json
+!config.example.json
+
+# Certificados y claves privadas (mTLS futuro)
+*.key
+*.pem
+*.csr
+certs.h
+mosquitto.passwd
 
 # ESP32 local configuration (contains Wi-Fi credentials – never commit)
 firmware/esp32/config.h
@@ -33,10 +58,11 @@ firmware/esp8266/config.h
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
 
 # Pytest
 .pytest_cache/
-.coverage
 
 # OS
 .DS_Store

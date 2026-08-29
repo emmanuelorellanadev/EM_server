@@ -25,7 +25,7 @@
     "host": "0.0.0.0",
     "port": 8080,
     "debug": false,
-    "secret_key": "change-this-secret-key-in-production",
+    "secret_key": "CHANGE_THIS_IN_PRODUCTION",
     "display_timezone": "America/Guatemala",
     "esp_panel_sources": ["esp8266", "esp32_01", "esp32_02"],
     "default_trend_source": "esp8266"

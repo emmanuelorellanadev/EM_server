@@ -17,6 +17,22 @@
 #include "config.h"
 #include <math.h>
 
+#if CONFIG_MODE
+  #define TAG_MQTT    "[MQTT_CONFIG]"
+  #define TAG_RIEGO   "[RIEGO_CONFIG]"
+  #define TAG_WIFI    "[WIFI_CONFIG]"
+  #define TAG_WEB     "[WEB_CONFIG]"
+  #define TAG_AMBIENT "[AMBIENT_CONFIG]"
+  #define TAG_HTTP    "[HTTP_CONFIG][WARN]"
+#else
+  #define TAG_MQTT    "[MQTT]"
+  #define TAG_RIEGO   "[RIEGO]"
+  #define TAG_WIFI    "[WIFI]"
+  #define TAG_WEB     "[WEB]"
+  #define TAG_AMBIENT "[AMBIENT]"
+  #define TAG_HTTP    "[HTTP][WARN]"
+#endif
+
 #if MQTT_WINDOW_SAMPLE_COUNT <= 0
 #error "MQTT_WINDOW_SAMPLE_COUNT debe ser mayor que 0"
 #endif
@@ -349,7 +365,7 @@ void updateRelay(float pct) {
         digitalWrite(PIN_RELAY, HIGH);
         relayStartMs = now;
         relayState   = WATERING;
-        Serial.printf("[RIEGO] Iniciado. Humedad: %.1f%%\n", pct);
+        Serial.printf(TAG_RIEGO " Iniciado. Humedad: %.1f%%\n", pct);
       }
       break;
 
@@ -359,14 +375,14 @@ void updateRelay(float pct) {
         lastWaterEndMs  = now;
         cooldownStartMs = now;
         relayState      = COOLDOWN;
-        Serial.println("[RIEGO] Terminado. Iniciando cooldown.");
+        Serial.println(TAG_RIEGO " Terminado. Iniciando cooldown.");
       }
       break;
 
     case COOLDOWN:
       if (now - cooldownStartMs >= COOLDOWN_MS) {
         relayState = IDLE;
-        Serial.println("[RIEGO] Cooldown finalizado. Listo para siguiente ciclo.");
+        Serial.println(TAG_RIEGO " Cooldown finalizado. Listo para siguiente ciclo.");
       }
       break;
   }
@@ -465,7 +481,7 @@ void handleJson() {
   json += "}";
 
   if (json.indexOf("\"last_watered_sec\":") == -1) {
-    Serial.printf("[HTTP][WARN] JSON sin last_watered_sec: %s\n", json.c_str());
+    Serial.printf(TAG_HTTP " JSON sin last_watered_sec: %s\n", json.c_str());
   }
 
   server.send(200, "application/json", json);
@@ -476,7 +492,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   memcpy(msg, payload, length);
   msg[length] = '\0';
 
-  Serial.printf("[MQTT] Mensaje recibido en %s: %s\n", topic, msg);
+  Serial.printf(TAG_MQTT " Mensaje recibido en %s: %s\n", topic, msg);
 
   if (strcmp(topic, MQTT_TOPICO_CMD) != 0) return;
 
@@ -486,9 +502,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       setStatusLed(true);
       relayStartMs = millis();
       relayState   = WATERING;
-      Serial.println("[MQTT] Comando 'water' recibido. Riego iniciado.");
+      Serial.println(TAG_MQTT " Comando 'water' recibido. Riego iniciado.");
     } else {
-      Serial.println("[MQTT] Comando 'water' recibido pero el sistema no esta en IDLE; ignorado.");
+      Serial.println(TAG_MQTT " Comando 'water' recibido pero el sistema no esta en IDLE; ignorado.");
     }
   }
 }
@@ -498,7 +514,7 @@ bool reconnectMQTT() {
 
   if (mqtt.connected()) return true;
 
-  Serial.print("[MQTT] Conectando a ");
+  Serial.print(TAG_MQTT " Conectando a ");
   Serial.print(MQTT_SERVER);
   Serial.print("...");
 
@@ -527,10 +543,10 @@ bool reconnectMQTT() {
     Serial.println(" OK");
 
     mqtt.subscribe(MQTT_TOPICO_CMD);
-    Serial.printf("[MQTT] Suscrito a %s\n", MQTT_TOPICO_CMD);
+    Serial.printf(TAG_MQTT " Suscrito a %s\n", MQTT_TOPICO_CMD);
 
     mqtt.publish(MQTT_STATUS_TOPIC, "online", true);
-    Serial.printf("[MQTT] Presencia online publicada en %s\n", MQTT_STATUS_TOPIC);
+    Serial.printf(TAG_MQTT " Presencia online publicada en %s\n", MQTT_STATUS_TOPIC);
   } else {
     Serial.print(" FALLO (rc=");
     Serial.print(mqtt.state());
@@ -546,7 +562,7 @@ bool ensureWiFiConnected() {
   if (now - lastWifiAttemptMs < WIFI_RECONNECT_INTERVAL_MS) return false;
 
   lastWifiAttemptMs = now;
-  Serial.println("[WIFI] Desconectado. Reintentando conexion...");
+  Serial.println(TAG_WIFI " Desconectado. Reintentando conexion...");
   WiFi.disconnect();
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   return false;
@@ -557,7 +573,7 @@ bool publicarMQTT() {
 
   AggregatedSnapshot snap;
   if (!buildAggregatedSnapshot(snap)) {
-    Serial.println("[MQTT] Sin muestras en ventana; publicacion omitida.");
+    Serial.println(TAG_MQTT " Sin muestras en ventana; publicacion omitida.");
     return false;
   }
 
@@ -585,7 +601,7 @@ bool publicarMQTT() {
   const char* publishTopic = MQTT_TOPICO;
 #endif
   bool publicado = mqtt.publish(publishTopic, json.c_str());
-  Serial.printf("[MQTT] Publicado en %s: %s (%s)\n",
+  Serial.printf(TAG_MQTT " Publicado en %s: %s (%s)\n",
                 publishTopic, json.c_str(), publicado ? "OK" : "FALLO");
   if (!publicado) {
     return false;
@@ -615,14 +631,14 @@ void setup() {
   pinMode(PIN_AMBIENT, INPUT_PULLUP);
   ambientSensor.begin();
   delay(2000);
-  Serial.printf("[AMBIENT] Sensor DHT iniciado en GPIO %d\n", PIN_AMBIENT);
+  Serial.printf(TAG_AMBIENT " Sensor DHT iniciado en GPIO %d\n", PIN_AMBIENT);
 #endif
 
   digitalWrite(PIN_RELAY, LOW);
   setStatusLed(false);
 
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-  Serial.print("[WIFI] Conectando");
+  Serial.print(TAG_WIFI " Conectando");
   unsigned long wifiBootStart = millis();
   while (WiFi.status() != WL_CONNECTED && (millis() - wifiBootStart < WIFI_BOOT_TIMEOUT_MS)) {
     delay(500);
@@ -630,18 +646,18 @@ void setup() {
   }
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println();
-    Serial.print("[WIFI] Conectado. IP: ");
+    Serial.print(TAG_WIFI " Conectado. IP: ");
     Serial.println(WiFi.localIP());
   } else {
     Serial.println();
-    Serial.println("[WIFI] Timeout inicial. El loop seguira reintentando.");
+    Serial.println(TAG_WIFI " Timeout inicial. El loop seguira reintentando.");
   }
 
 #if CONFIG_MODE
   server.on("/",     handleRoot);
   server.on("/json", handleJson);
   server.begin();
-  Serial.println("[WEB] Servidor iniciado en puerto 80");
+  Serial.println(TAG_WEB " Servidor iniciado en puerto 80");
 #endif
 
   captureAggregationSample();
@@ -659,7 +675,7 @@ void setup() {
       MQTT_CLIENT_ID,
       (unsigned long)getDeviceIdSuffix()
     );
-    Serial.printf("[MQTT] ClientId dinamico: %s\n", mqttClientIdDynamic);
+    Serial.printf(TAG_MQTT " ClientId dinamico: %s\n", mqttClientIdDynamic);
 
     mqtt.setServer(MQTT_SERVER, MQTT_PORT);
     mqtt.setCallback(mqttCallback);
@@ -677,9 +693,9 @@ void setup() {
       if (publicarMQTT()) {
         bootstrapTelemetryPublished = true;
         lastMqttPublishMs = millis();
-        Serial.println("[MQTT] Telemetria bootstrap publicada.");
+        Serial.println(TAG_MQTT " Telemetria bootstrap publicada.");
       } else {
-        Serial.println("[MQTT] Telemetria bootstrap omitida; se reintentara en loop().");
+        Serial.println(TAG_MQTT " Telemetria bootstrap omitida; se reintentara en loop().");
       }
     }
   }
@@ -724,7 +740,7 @@ void loop() {
     const bool published = publicarMQTT();
     lastMqttPublishMs = now;
     if (!published) {
-      Serial.println("[MQTT] Ventana no publicada; se reintentara en el siguiente intervalo.");
+      Serial.println(TAG_MQTT " Ventana no publicada; se reintentara en el siguiente intervalo.");
     }
   }
 

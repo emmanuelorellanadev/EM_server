@@ -12,9 +12,12 @@
 */
 
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <time.h>
 #include <WebServer.h>
 #include <PubSubClient.h>
 #include "config.h"
+#include "certs.h"
 #include <math.h>
 
 #if CONFIG_MODE
@@ -63,7 +66,9 @@
 
 WebServer server(80);
 
-WiFiClient   wifiClient;
+// WiFiClientSecure soporta TLS/mTLS para conexion segura al broker.
+// Requiere CA cert (para validar broker) + client cert/key (para mTLS).
+WiFiClientSecure wifiClient;
 PubSubClient mqtt(wifiClient);
 
 char mqttClientIdDynamic[32] = {0};
@@ -664,6 +669,33 @@ void setup() {
   lastControlSampleMs = millis();
   lastAggregationSampleMs = lastControlSampleMs;
   lastMqttPublishMs = lastControlSampleMs;
+
+  // ======================================================================
+  // TLS/mTLS: Sincronizar reloj y cargar certificados
+  // ======================================================================
+  // NTP es OBLIGATORIO para TLS porque los certificados tienen fechas de
+  // validez (notBefore/notAfter). Sin reloj correcto, el ESP32 rechazaria
+  // todos los certificados como "expirados".
+  //
+  // configTime(zona_horaria, dst, servidorNTP1, servidorNTP2)
+  //   0, 0 = UTC sin horario de verano
+  //
+  // Despues de configTime, el ESP32 obtiene la hora via NTP en background.
+  // Usamos delay(2000) para dar tiempo suficiente a la primera sincronizacion.
+  if (strlen(MQTT_SERVER) > 0 && MQTT_PORT == 8883) {
+    Serial.println("[NTP] Sincronizando reloj para TLS...");
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    delay(2000);
+
+    // Cargar certificados para mTLS.
+    // setCACert: CA raiz para validar el certificado del broker
+    // setCertificate: certificado de identidad de este ESP32
+    // setPrivateKey: clave privada para probar posesion del certificado
+    wifiClient.setCACert(MQTT_CA_CERT);
+    wifiClient.setCertificate(MQTT_CLIENT_CERT);
+    wifiClient.setPrivateKey(MQTT_CLIENT_KEY);
+    Serial.println("[TLS] Certificados cargados. Canal mTLS habilitado.");
+  }
 
   if (strlen(MQTT_SERVER) > 0) {
     const int prefixMaxLen = (int)sizeof(mqttClientIdDynamic) - 8;

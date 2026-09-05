@@ -36,7 +36,7 @@ Integra dos fuentes de datos:
 │                                                       │
 │  ┌──────────────┐   MQTT       ┌──────────────────┐  │
 │  │ Sense HAT v1 │─────────────►│  Mosquitto Broker│  │
-│  │ temp/hum/pres│  local       │  (localhost:1883) │  │
+│  │ temp/hum/pres│  local       │  (localhost:8883) │  │
 │  └──────────────┘              └────────┬─────────┘  │
 │                                         │             │
 │                            subscribe (sensors/#)      │
@@ -120,11 +120,8 @@ El sensor K8/C11 es de tipo **resistivo/capacitivo** y tiene dos salidas:
   - Suelo **húmedo** → resistencia baja → tensión baja → ADC ≈ 300
 - **DO (digital):** HIGH/LOW según el potenciómetro de calibración del módulo.
 
-El firmware convierte el ADC crudo a porcentaje de humedad:
-```
-humedad_% = (RAW_DRY - raw) / (RAW_DRY - RAW_WET) × 100
-```
-Ajusta `RAW_DRY` y `RAW_WET` en `config.h` con mediciones reales.
+> Para la fórmula de conversión ADC a porcentaje y las variables de calibración
+> `RAW_DRY`/`RAW_WET`, ver `firmware/esp32/CONFIGURACION.md` sección 2.
 
 ---
 
@@ -279,6 +276,9 @@ EM_server/
 │
 ├── deploy/
 │   ├── setup.sh             # Script de instalación automática (Raspbian)
+│   ├── mosquitto/
+│   │   ├── tls.conf         # Configuración TLS/mTLS del broker
+│   │   └── acl              # Control de acceso por topic y dispositivo
 │   └── systemd/
 │       ├── em-mqtt-client.service
 │       ├── em-sensehat-client.service
@@ -323,6 +323,41 @@ El script:
 3. Copia `config.example.json` → `config.json` si no existe y genera una clave secreta
 4. Habilita los tres servicios systemd para arranque automático
 
+#### Configurar TLS (recomendado para producción)
+
+```bash
+# 1. Copiar certificados a la Raspberry Pi
+scp certs/ca.crt certs/EM-broker.crt certs/EM-broker.key pi@raspberry:/tmp/
+scp certs/ca.crt certs/EM-mqtt_client.crt certs/EM-mqtt_client.key pi@raspberry:/tmp/em_certs/
+scp firmware/esp32/certs/EM-esp32_01.crt firmware/esp32/certs/EM-esp32_01.key pi@raspberry:/tmp/esp32_certs/
+
+# 2. En la Raspberry Pi, instalar certificados
+ssh pi@raspberry
+
+# Certificados del broker
+sudo mkdir -p /etc/mosquitto/certs
+sudo cp /tmp/ca.crt /tmp/EM-broker.crt /tmp/EM-broker.key /etc/mosquitto/certs/
+sudo chown mosquitto:mosquitto /etc/mosquitto/certs/*
+sudo chmod 600 /etc/mosquitto/certs/EM-broker.key
+
+# Certificados del cliente Python
+sudo mkdir -p /etc/em/certs
+sudo cp /tmp/em_certs/ca.crt /tmp/em_certs/EM-mqtt_client.crt /tmp/em_certs/EM-mqtt_client.key /etc/em/certs/
+sudo chmod 600 /etc/em/certs/EM-mqtt_client.key
+
+# Certificados del ESP32 (para pruebas)
+sudo mkdir -p /etc/em/esp32_certs
+sudo cp /tmp/esp32_certs/EM-esp32_01.crt /tmp/esp32_certs/EM-esp32_01.key /etc/em/esp32_certs/
+sudo chmod 600 /etc/em/esp32_certs/EM-esp32_01.key
+
+# 3. Copiar configuración TLS
+sudo cp deploy/mosquitto/tls.conf /etc/mosquitto/conf.d/
+sudo cp deploy/mosquitto/acl /etc/mosquitto/acl
+sudo systemctl restart mosquitto
+```
+
+Ver [Seguridad MQTT](#seguridad-mqtt-tlsmtls) para más detalles.
+
 ---
 
 ## Instalación manual
@@ -350,7 +385,32 @@ cp config.example.json config.json
 # Editar config.json con la IP del broker y credenciales
 ```
 
-### 4. Iniciar servicios
+### 4. Configurar TLS (recomendado)
+
+```bash
+# Copiar certificados del broker
+sudo mkdir -p /etc/mosquitto/certs
+sudo cp certs/ca.crt certs/EM-broker.crt certs/EM-broker.key /etc/mosquitto/certs/
+sudo chown mosquitto:mosquitto /etc/mosquitto/certs/*
+sudo chmod 600 /etc/mosquitto/certs/EM-broker.key
+
+# Copiar certificados del cliente Python
+sudo mkdir -p /etc/em/certs
+sudo cp certs/ca.crt certs/EM-mqtt_client.crt certs/EM-mqtt_client.key /etc/em/certs/
+sudo chmod 600 /etc/em/certs/EM-mqtt_client.key
+
+# Copiar certificados del ESP32 (para pruebas)
+sudo mkdir -p /etc/em/esp32_certs
+sudo cp firmware/esp32/certs/EM-esp32_01.crt firmware/esp32/certs/EM-esp32_01.key /etc/em/esp32_certs/
+sudo chmod 600 /etc/em/esp32_certs/EM-esp32_01.key
+
+# Configurar Mosquitto
+sudo cp deploy/mosquitto/tls.conf /etc/mosquitto/conf.d/
+sudo cp deploy/mosquitto/acl /etc/mosquitto/acl
+sudo systemctl restart mosquitto
+```
+
+### 5. Iniciar servicios
 
 ```bash
 # Suscriptor MQTT (almacena en SQLite)
@@ -371,8 +431,7 @@ Abre `http://<IP_de_la_Raspberry>:8080` en el navegador.
 
 ```bash
 # 1. Copia la plantilla de configuración
-cp firmware/esp32/config.example.h \
-   firmware/esp32/config.h
+cp firmware/esp32/config.example.h firmware/esp32/config.h
 
 # 2. Edita config.h con tu red Wi-Fi, IP del broker y calibración
 
@@ -393,14 +452,9 @@ Cableado del ESP32 (DevKit):
 | DHT22 (temp./humedad) | 27 (D27) | lectura digital |
 | Relé (active-high) | 12 (D12) | salida digital |
 
-> El sensor de suelo debe conectarse a un pin ADC1 (GPIO 32-39). Los pines
-> ADC2 devuelven `0` mientras el WiFi está activo. Tras el cambio de pin,
-> recalibra `RAW_DRY` / `RAW_WET` (el ADC del ESP32 es de 12 bits, 0-4095).
-
-El ESP publica telemetria agregada segun:
-- `AGGREGATION_SAMPLE_MS`
-- `MQTT_PUBLISH_INTERVAL_MS`
-- `MQTT_WINDOW_SAMPLE_COUNT`
+> Para calibración ADC, temporizadores de muestreo, umbrales de riego,
+> modo debug y configuración TLS/mTLS del ESP32, ver
+> `firmware/esp32/CONFIGURACION.md`.
 
 El nodo publica presencia en `devices/<nodo>/status` (`online`/`offline`) con LWT.
 
@@ -423,6 +477,10 @@ sobreescritos por variables de entorno (útil en producción):
 | `EM_WEB_DEBUG` | `web.debug` | Modo debug |
 | `EM_DB_PATH` | `database.path` | Ruta de SQLite |
 | `EM_API_KEY` | `web.api_key` | API key para autenticación |
+| `EM_MQTT_TLS_ENABLED` | `mqtt.tls.enabled` | Habilitar TLS (`true`/`false`) |
+| `EM_MQTT_TLS_CA_CERT` | `mqtt.tls.ca_cert` | Ruta a `ca.crt` |
+| `EM_MQTT_TLS_CLIENT_CERT` | `mqtt.tls.client_cert` | Ruta a certificado de cliente (`EM-mqtt_client.crt`) |
+| `EM_MQTT_TLS_CLIENT_KEY` | `mqtt.tls.client_key` | Ruta a clave privada de cliente (`EM-mqtt_client.key`) |
 
 ### Parámetros de config.json
 
@@ -433,6 +491,11 @@ sobreescritos por variables de entorno (útil en producción):
 | `mqtt.username` / `password` | Credenciales (vacío = sin auth) | `""` |
 | `mqtt.client_id_subscriber` | Client ID del suscriptor MQTT | `em_server_subscriber` |
 | `mqtt.client_id_sensehat` | Client ID del publicador Sense HAT | `em_server_sensehat` |
+| `mqtt.tls.enabled` | Habilitar TLS/mTLS | `false` |
+| `mqtt.tls.ca_cert` | Ruta al certificado CA (`ca.crt`) | `""` |
+| `mqtt.tls.client_cert` | Ruta al certificado del cliente | `""` |
+| `mqtt.tls.client_key` | Ruta a la clave privada del cliente | `""` |
+| `mqtt.tls.insecure` | Saltar verificación de hostname (solo desarrollo) | `false` |
 | `mqtt.topics.all` | Tópico wildcard de suscripción | `sensors/#` |
 | `mqtt.topics.device_status` | Tópico wildcard de presencia de dispositivos | `devices/+/status` |
 | `database.path` | Ruta del archivo SQLite | `em_db/em_server.db` |
@@ -464,6 +527,303 @@ Permite renombrar campos del payload MQTT antes de guardarlos en la base de dato
   }
 }
 ```
+
+---
+
+## Seguridad MQTT (TLS/mTLS)
+
+### ¿Qué es mTLS?
+
+**TLS** (Transport Layer Security) cifra la comunicación entre cliente y servidor.
+**mTLS** (mutual TLS) va más allá: ambos lados se autentican mutuamente con certificados.
+
+```
+TLS normal:   Cliente verifica al Broker
+mTLS:         Cliente verifica al Broker  Y  Broker verifica al Cliente
+```
+
+En EM_server, mTLS garantiza que:
+- El ESP32 solo se conecta a **tu** Raspberry Pi (no a un broker falso)
+- El broker solo acepta conexiones de **tus** dispositivos autorizados
+- Todo el tráfico MQTT viaja cifrado (sin posibilidad de sniffing)
+
+### Paso 1: Crear la CA (Autoridad Certificadora)
+
+La CA es la raíz de confianza. Con ella firmas todos los certificados del sistema.
+
+> **IMPORTANTE:** `ca.key` es el archivo más crítico. Si se compromete, toda la
+> cadena de confianza se rompe. Guárdalo en un USB offline y NUNCA lo subas al repo.
+
+```bash
+mkdir -p certs && cd certs
+
+# Generar clave privada de la CA (4096 bits para máxima seguridad)
+openssl genrsa -out ca.key 4096
+
+# Crear certificado autofirmado de la CA (válido 10 años)
+openssl req -x509 -new -nodes -key ca.key -sha256 -days 3650 \
+  -out ca.crt -subj "/CN=EM-Root-CA"
+```
+
+### Paso 2: Crear certificado del broker Mosquitto
+
+El broker necesita un certificado con **SANs** (Subject Alternative Names) para
+que los clientes puedan conectarse por diferentes hostnames/IPs.
+
+```bash
+# 1. Crear archivo de extensión con SANs
+cat > broker_ext.cnf << 'EOF'
+[req]
+distinguished_name = req_distinguished_name
+req_extensions = v3_req
+
+[req_distinguished_name]
+
+[v3_req]
+basicConstraints = CA:FALSE
+keyUsage = digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost
+DNS.2 = raspberrypi.local
+IP.1 = 127.0.0.1
+IP.2 = 192.168.1.2
+EOF
+
+# 2. Generar clave privada del broker
+openssl genrsa -out EM-broker.key 2048
+
+# 3. Crear CSR (Certificate Signing Request)
+openssl req -new -key EM-broker.key -out EM-broker.csr \
+  -subj "/CN=raspberrypi.local" -config broker_ext.cnf
+
+# 4. Firmar con la CA (incluyendo SANs)
+openssl x509 -req -in EM-broker.csr \
+  -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out EM-broker.crt -days 825 -sha256 \
+  -extensions v3_req -extfile broker_ext.cnf
+
+# 5. Verificar SANs
+openssl x509 -in EM-broker.crt -noout -text | grep -A5 "Subject Alternative"
+# Debe mostrar: DNS:localhost, DNS:raspberrypi.local, IP:127.0.0.1, IP:192.168.1.2
+
+# 6. Limpiar archivos temporales
+rm -f EM-broker.csr broker_ext.cnf
+```
+
+> **¿Por qué SANs?** OpenSSL moderno ya NO acepta solo el CN para validar
+> hostname. Necesitas SANs para que `localhost`, `raspberrypi.local` e IP
+> sean aceptados como nombres válidos del servidor.
+
+### Paso 3: Crear certificado del cliente ESP32
+
+```bash
+# Generar clave privada del ESP32
+openssl genrsa -out EM-esp32_01.key 2048
+
+# Crear CSR con CN=EM-esp32_01
+openssl req -new -key EM-esp32_01.key -out EM-esp32_01.csr \
+  -subj "/CN=EM-esp32_01"
+
+# Firmar con la CA
+openssl x509 -req -in EM-esp32_01.csr \
+  -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out EM-esp32_01.crt -days 825 -sha256
+
+# Limpiar
+rm -f EM-esp32_01.csr
+```
+
+### Paso 4: Crear certificado del cliente Python
+
+```bash
+# Generar clave privada del suscriptor Python
+openssl genrsa -out EM-mqtt_client.key 2048
+
+# Crear CSR con CN=em_server_subscriber
+openssl req -new -key EM-mqtt_client.key -out EM-mqtt_client.csr \
+  -subj "/CN=em_server_subscriber"
+
+# Firmar con la CA
+openssl x509 -req -in EM-mqtt_client.csr \
+  -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out EM-mqtt_client.crt -days 825 -sha256
+
+# Limpiar
+rm -f EM-mqtt_client.csr
+```
+
+### Estructura final de certificados
+
+```
+certs/                              ← Certificados del SERVIDOR (Python + Mosquitto)
+├── ca.crt                          ← CA raiz (firma todos los certificados)
+├── ca.key                          ← Clave privada de la CA (GUARDAR EN USB OFFLINE)
+├── ca.srl                          ← Serial de la CA (auto-generado)
+├── EM-broker.crt                   ← Certificado del broker (con SANs)
+├── EM-broker.key                   ← Clave privada del broker
+├── EM-mqtt_client.crt              ← Certificado del suscriptor Python (CN=em_server_subscriber)
+└── EM-mqtt_client.key              ← Clave privada del suscriptor Python
+
+firmware/esp32/certs/               ← Certificados del ESP32 (respaldo PEM)
+├── ca.crt                          ← Misma CA raiz
+├── EM-esp32_01.crt                 ← Certificado de identidad del ESP32 (CN=EM-esp32_01)
+└── EM-esp32_01.key                 ← Clave privada del ESP32
+
+firmware/esp32/certs.h              ← PEM embebidos en código C (NO subir al repo)
+```
+
+### Roles por certificado
+
+| Certificado | Quién lo usa | Para qué |
+|---|---|---|
+| `ca.crt` | Todos | Raíz de confianza — valida que los certificados fueron firmados por tu CA |
+| `EM-broker.crt`/`.key` | Mosquitto | Identidad del broker — el ESP32 y Python validan que hablan con el broker legítimo |
+| `EM-esp32_01.crt`/`.key` | ESP32 | Identidad del ESP32 — el broker verifica que el cliente es `esp32_01` autorizado |
+| `EM-mqtt_client.crt`/`.key` | Python | Identidad del suscriptor — el broker verifica que es `em_server_subscriber` |
+
+### Paso 5: Desplegar en la Raspberry Pi
+
+Copia los certificados desde tu Mac a la Pi. Ejecuta **en tu Mac**:
+
+```bash
+# Copiar certificados del broker
+scp certs/ca.crt certs/EM-broker.crt certs/EM-broker.key pi@raspberry:/tmp/
+
+# Copiar certificados del cliente Python
+scp certs/ca.crt certs/EM-mqtt_client.crt certs/EM-mqtt_client.key pi@raspberry:/tmp/em_certs/
+
+# Copiar certificados del ESP32 (para pruebas con mosquitto_pub)
+scp firmware/esp32/certs/EM-esp32_01.crt firmware/esp32/certs/EM-esp32_01.key pi@raspberry:/tmp/esp32_certs/
+
+# Copiar configuración TLS y ACL
+scp deploy/mosquitto/tls.conf deploy/mosquitto/acl pi@raspberry:/tmp/
+```
+
+Ahora ejecuta **en la Raspberry Pi**:
+
+```bash
+# 1. Instalar certificados del broker
+sudo mkdir -p /etc/mosquitto/certs
+sudo cp /tmp/ca.crt /tmp/EM-broker.crt /tmp/EM-broker.key /etc/mosquitto/certs/
+sudo chown mosquitto:mosquitto /etc/mosquitto/certs/*
+sudo chmod 600 /etc/mosquitto/certs/EM-broker.key
+sudo chmod 644 /etc/mosquitto/certs/ca.crt /etc/mosquitto/certs/EM-broker.crt
+
+# 2. Instalar configuración TLS y ACL
+sudo cp /tmp/tls.conf /etc/mosquitto/conf.d/
+sudo cp /tmp/acl /etc/mosquitto/acl
+
+# 3. Instalar certificados del cliente Python
+sudo mkdir -p /etc/em/certs
+sudo cp /tmp/em_certs/ca.crt /tmp/em_certs/EM-mqtt_client.crt /tmp/em_certs/EM-mqtt_client.key /etc/em/certs/
+sudo chmod 600 /etc/em/certs/EM-mqtt_client.key
+sudo chmod 644 /etc/em/certs/ca.crt /etc/em/certs/EM-mqtt_client.crt
+
+# 4. Preparar certificados del ESP32 (para pruebas)
+sudo mkdir -p /etc/em/esp32_certs
+sudo cp /tmp/esp32_certs/EM-esp32_01.crt /tmp/esp32_certs/EM-esp32_01.key /etc/em/esp32_certs/
+sudo chmod 600 /etc/em/esp32_certs/EM-esp32_01.key
+
+# 5. Reiniciar Mosquitto
+sudo systemctl restart mosquitto
+
+# 6. Verificar que escucha en 8883
+ss -tlnp | grep mosquitto
+```
+
+### Paso 6: Verificar la conexión (desde la Raspberry Pi)
+
+```bash
+# ── Prueba 1: Con certificado ESP32 (debe funcionar) ──────────────
+mosquitto_pub -h localhost -p 8883 \
+  --cafile /etc/mosquitto/certs/ca.crt \
+  --cert /etc/em/esp32_certs/EM-esp32_01.crt \
+  --key /etc/em/esp32_certs/EM-esp32_01.key \
+  -t "sensors/esp32_01" -m '{"test": true}' -d
+# Salida esperada: Client null sending CONNECT → CONNACK (0) → PUBLISH → DISCONNECT
+
+# ── Prueba 2: Con certificado Python (debe funcionar) ─────────────
+mosquitto_pub -h localhost -p 8883 \
+  --cafile /etc/mosquitto/certs/ca.crt \
+  --cert /etc/em/certs/EM-mqtt_client.crt \
+  --key /etc/em/certs/EM-mqtt_client.key \
+  -t "sensors/test" -m '{"test": true}' -d
+# Salida esperada: CONNACK (0)
+
+# ── Prueba 3: SIN certificado (debe FALLAR) ───────────────────────
+mosquitto_pub -h localhost -p 8883 \
+  --cafile /etc/mosquitto/certs/ca.crt \
+  -t "test" -m "should fail" -d
+# Salida esperada: Error de conexión / Connection refused
+
+# ── Prueba 4: Verificar cipher TLS ────────────────────────────────
+openssl s_client -connect localhost:8883 \
+  -CAfile /etc/mosquitto/certs/ca.crt \
+  -cert /etc/em/esp32_certs/EM-esp32_01.crt \
+  -key /etc/em/esp32_certs/EM-esp32_01.key \
+  </dev/null 2>/dev/null | grep -E "Protocol|Cipher|Verify"
+# Salida esperada: Protocol=TLSv1.2, Verify return code: 0 (ok)
+
+# ── Prueba 5: Verificar que un cert fue firmado por la CA ─────────
+openssl verify -CAfile /etc/mosquitto/certs/ca.crt /etc/em/certs/EM-mqtt_client.crt
+# Salida: OK
+```
+
+### Configurar el servidor Python
+
+Verificar que `config.json` tenga el bloque TLS correcto:
+
+```json
+{
+  "mqtt": {
+    "broker": "localhost",
+    "port": 8883,
+    "tls": {
+      "enabled": true,
+      "ca_cert": "/etc/em/certs/ca.crt",
+      "client_cert": "/etc/em/certs/EM-mqtt_client.crt",
+      "client_key": "/etc/em/certs/EM-mqtt_client.key",
+      "insecure": false
+    }
+  }
+}
+```
+
+### Configurar el ESP32 (mTLS)
+
+1. Verificar `MQTT_PORT 8883` en `config.h`
+2. Generar `firmware/esp32/certs.h` con los PEM embebidos (ver script en CONFIGURACION.md §9.4)
+3. El firmware `esp32.ino` ya incluye `WiFiClientSecure`, NTP y carga de certificados
+
+> Para instrucciones detalladas sobre `certs.h` (sintaxis C, `PROGMEM`,
+> generación manual/automática), cambios en `esp32.ino` y diagnóstico de TLS,
+> ver `firmware/esp32/CONFIGURACION.md` sección 9.
+
+### Flujo de autenticación mTLS
+
+```
+ESP32_01                              Mosquitto Broker                      CA
+   │                                       │                               │
+   │ ──── ClientHello (propongo TLS 1.2) ──►                               │
+   │ ◄─── ServerHello + EM-broker.crt ──────                               │
+   │                                       │                               │
+   │ ──── valida EM-broker.crt con ca.crt ─┘                               │
+   │                                       │                               │
+   │ ◄─── CertificateRequest ──────────────│                               │
+   │ ──── EM-esp32_01.crt ────────────────►│                               │
+   │ ──── prueba con EM-esp32_01.key ─────►│ ──── valida firma ──────────►│
+   │                                       │ ◄─── confianza por ca.crt ───┘
+   │                                       │                               │
+   │ ◄─── Finished (TLS OK) ──────────────│                               │
+   │ ──── Finished (TLS OK) ─────────────►│                               │
+   │                                       │                               │
+   │ ════ MQTT cifrado (CONNECT/PUBLISH) ════════════════════════════════ │
+```
+
+> Para más detalles teóricos, ver `SEGURIDAD_MQTT_TLS.md` y `seguridad.md`.
 
 ---
 

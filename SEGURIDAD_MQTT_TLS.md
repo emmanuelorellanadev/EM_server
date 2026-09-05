@@ -248,6 +248,12 @@ openssl genrsa -out mqtt_client.key 2048
 openssl req -new -key mqtt_client.key -out mqtt_client.csr -subj "/CN=em_server_subscriber"
 openssl x509 -req -in mqtt_client.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
   -out mqtt_client.crt -days 825 -sha256
+
+# 3) Cert de cliente (ejemplo: esp32_01)
+openssl genrsa -out esp32_01.key 2048
+openssl req -new -key esp32_01.key -out esp32_01.csr -subj "/CN=esp32_01"
+openssl x509 -req -in esp32_01.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out esp32_01.crt -days 825 -sha256
 ```
 
 > Practica segura: `ca.key` no debe vivir en el mismo host productivo.

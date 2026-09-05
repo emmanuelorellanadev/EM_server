@@ -13,6 +13,7 @@ Run:
 import argparse
 import json
 import signal
+import ssl
 import time
 
 import paho.mqtt.client as mqtt
@@ -134,6 +135,23 @@ def _on_disconnect(client, userdata, rc):
 
 
 def build_client(config: dict, db_path: str) -> mqtt.Client:
+    """Build and configure an MQTT client with optional TLS/mTLS.
+
+    When mqtt.tls.enabled is true in config.json, the client loads:
+      - ca_cert:    CA root certificate to validate the broker
+      - client_cert: This client's certificate (for mTLS authentication)
+      - client_key:  This client's private key (proof of identity)
+
+    The broker uses the CN from client_cert as the MQTT username (mTLS)
+    and applies ACL rules based on that identity.
+
+    Args:
+        config: Parsed config.json dictionary.
+        db_path: Path to the SQLite database file.
+
+    Returns:
+        Configured paho.mqtt.Client instance (not yet connected).
+    """
     cfg = config["mqtt"]
     client = mqtt.Client(
         client_id=cfg["client_id_subscriber"],
@@ -146,7 +164,41 @@ def build_client(config: dict, db_path: str) -> mqtt.Client:
     if cfg.get("username"):
         client.username_pw_set(cfg["username"], cfg.get("password", ""))
 
-    client.connect(cfg["broker"], cfg["port"], keepalive=60)
+    # ── TLS/mTLS configuration ──────────────────────────────────────
+    # If tls.enabled is true in config.json, we configure the client to:
+    #   1. Validate the broker's certificate using the CA root (tls_set)
+    #   2. Present our own certificate for mTLS (certfile + keyfile)
+    #   3. Optionally skip hostname verification (insecure, not recommended)
+    #
+    # This is required when the broker has "require_certificate true"
+    # in its configuration (port 8883 with mTLS).
+    tls_cfg = cfg.get("tls", {})
+    if tls_cfg.get("enabled"):
+        ca = tls_cfg["ca_cert"]
+        cert = tls_cfg.get("client_cert")
+        key = tls_cfg.get("client_key")
+        try:
+            client.tls_set(ca_certs=ca, certfile=cert, keyfile=key)
+        except (FileNotFoundError, PermissionError, ssl.SSLError) as exc:
+            logger.error(
+                "TLS setup failed — check cert file permissions and paths. "
+                "ca=%s cert=%s key=%s error=%s",
+                ca, cert, key, exc,
+            )
+            raise SystemExit(1) from exc
+        # insecure=True skips hostname verification — ONLY for development.
+        # In production, always use False (default) to prevent MITM attacks.
+        client.tls_insecure_set(bool(tls_cfg.get("insecure", False)))
+        logger.info("TLS/mTLS enabled: ca=%s cert=%s key=%s", ca, cert, key)
+
+    try:
+        client.connect(cfg["broker"], cfg["port"], keepalive=60)
+    except OSError as exc:
+        logger.error(
+            "MQTT connect failed: broker=%s port=%d error=%s",
+            cfg["broker"], cfg["port"], exc,
+        )
+        raise SystemExit(1) from exc
     return client
 
 
@@ -157,7 +209,13 @@ def run(config_path: str = "config.json") -> None:
     init_db(db_path)
     logger.info("Database initialised at %s", db_path)
 
-    client = build_client(config, db_path)
+    try:
+        client = build_client(config, db_path)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        logger.error("Failed to build MQTT client: %s", exc)
+        raise SystemExit(1) from exc
 
     def _handle_signal(signum, frame):
         global _running

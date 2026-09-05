@@ -242,10 +242,11 @@ def _mqtt_publish_command(mqtt_cfg: dict, topic: str, payload: dict) -> None:
     """Publish a single MQTT command message and disconnect immediately.
 
     Uses paho.mqtt.publish.single() for one-shot command publishing.
+    Supports TLS/mTLS when mqtt.tls.enabled is configured.
 
     Args:
         mqtt_cfg: The ``mqtt`` block from config.json.
-        topic:    MQTT topic to publish to (e.g. "commands/esp8266").
+        topic:    MQTT topic to publish to (e.g. "commands/esp32_01").
         payload:  Dict that will be serialised to JSON and sent as the message body.
 
     Raises:
@@ -258,6 +259,19 @@ def _mqtt_publish_command(mqtt_cfg: dict, topic: str, payload: dict) -> None:
             "password": mqtt_cfg.get("password", ""),
         }
 
+    # ── TLS/mTLS configuration for one-shot publish ─────────────────
+    # paho.mqtt.publish.single() accepts a "tls" dict parameter.
+    # When tls.enabled is true, we pass the certificate paths so the
+    # command is sent over the encrypted channel with client authentication.
+    tls = None
+    if mqtt_cfg.get("tls", {}).get("enabled"):
+        tls = {
+            "ca_certs": mqtt_cfg["tls"]["ca_cert"],
+            "certfile": mqtt_cfg["tls"].get("client_cert"),
+            "keyfile": mqtt_cfg["tls"].get("client_key"),
+            "insecure": bool(mqtt_cfg["tls"].get("insecure", False)),
+        }
+
     mqtt_publish.single(
         topic,
         payload=json.dumps(payload),
@@ -265,6 +279,7 @@ def _mqtt_publish_command(mqtt_cfg: dict, topic: str, payload: dict) -> None:
         hostname=mqtt_cfg["broker"],
         port=mqtt_cfg["port"],
         auth=auth,
+        tls=tls,
     )
 
 

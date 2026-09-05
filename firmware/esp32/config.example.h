@@ -243,7 +243,8 @@
 //   Dejar "" para deshabilitar MQTT.
 #define MQTT_SERVER      "192.168.1.2"
 
-#define MQTT_PORT        1883   // 1883 = sin TLS, 8883 = con TLS
+#define MQTT_PORT        8883   // 8883 = con TLS/mTLS (requiere certs.h)
+                               // 1883 = sin TLS (solo para desarrollo local)
 
 // Identificador único de ESTE dispositivo ante el broker.
 // Si dos dispositivos usan el mismo CLIENT_ID, el broker desconecta

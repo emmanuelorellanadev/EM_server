@@ -1,7 +1,14 @@
 {
   "mqtt": {
     "broker": "localhost",
-    "port": 1883,
+    "port": 8883,
+    "tls": {
+      "enabled": true,
+      "ca_cert": "/etc/em/certs/ca.crt",
+      "client_cert": "/etc/em/certs/EM-mqtt_client.crt",
+      "client_key": "/etc/em/certs/EM-mqtt_client.key",
+      "insecure": false
+    },
     "username": "",
     "password": "",
     "topics": {

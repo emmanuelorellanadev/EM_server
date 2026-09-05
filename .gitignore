@@ -42,12 +42,16 @@ logs/
 config.json
 !config.example.json
 
-# Certificados y claves privadas (mTLS futuro)
+# Certificados y claves privadas (mTLS)
 *.key
 *.pem
 *.csr
 certs.h
 mosquitto.passwd
+# Carpetas de certificados (respaldo de PEM originales)
+certs/
+firmware/esp32/certs/
+firmware/esp8266/certs/
 
 # ESP32 local configuration (contains Wi-Fi credentials – never commit)
 firmware/esp32/config.h

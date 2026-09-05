@@ -1,0 +1,32 @@
+# Mosquitto ACL for EM_server
+# Copy to: /etc/mosquitto/acl
+#
+# Each device can only publish/subscribe to its own topics.
+# The CN from the client certificate is used as the username.
+
+# ESP32 devices
+user esp32_01
+topic readwrite sensors/esp32_01
+topic readwrite commands/esp32_01
+topic readwrite devices/esp32_01/status
+
+user esp32_02
+topic readwrite sensors/esp32_02
+topic readwrite commands/esp32_02
+topic readwrite devices/esp32_02/status
+
+# Python server - subscriber (can read all sensor data)
+user em_server_subscriber
+topic read sensors/#
+topic read devices/+/status
+
+# Python server - Sense HAT publisher
+user em_server_sensehat
+topic write sensors/raspberrypi
+topic read sensors/#
+
+# Python server - command publisher
+user em_server_dashboard
+topic read sensors/#
+topic read devices/+/status
+topic write commands/#

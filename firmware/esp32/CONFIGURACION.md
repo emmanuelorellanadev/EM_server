@@ -168,3 +168,217 @@ mosquitto_sub -t 'devices/+/status' -v
 # Ver datos en la base de datos
 sqlite3 em_server.db "SELECT source, field, COUNT(*) FROM readings GROUP BY source, field;"
 ```
+
+## 9. Configuracion TLS/mTLS
+
+Esta seccion explica como el ESP32 se conecta de forma segura al broker Mosquitto
+usando mTLS (autenticacion mutua con certificados).
+
+### 9.1 Requisitos previos
+
+- `MQTT_PORT` debe ser `8883` (TLS) en `config.h`, NO `1883` (texto plano)
+- Los certificados PEM deben existir en `firmware/esp32/certs/`
+- El archivo `firmware/esp32/certs.h` debe estar generado con los PEM embebidos
+
+### 9.2 Variables de TLS
+
+| Variable | En `config.h` | Funcion |
+|---|---|---|
+| `MQTT_PORT` | `8883` | Puerto TLS. Si es 1883, TLS se deshabilita automaticamente |
+
+El resto de la configuracion TLS esta en `certs.h` (constantes C, no editables
+desde `config.h`).
+
+### 9.3 Que es `certs.h` y como crearlo
+
+El ESP32 **no tiene sistema de archivos** como una PC. No puede leer certificados
+de archivos `.crt` o `.key`. En su lugar, los certificados se **embeben directamente
+en el codigo fuente** como strings C.
+
+El archivo `certs.h` contiene 3 constantes:
+
+| Constante | Contenido | Usada por |
+|---|---|---|
+| `MQTT_CA_CERT` | CA raiz (`ca.crt`) | `wifiClient.setCACert()` — valida el certificado del broker |
+| `MQTT_CLIENT_CERT` | Certificado del ESP32 (`EM-esp32_01.crt`) | `wifiClient.setCertificate()` — identidad del ESP32 |
+| `MQTT_CLIENT_KEY` | Clave privada del ESP32 (`EM-esp32_01.key`) | `wifiClient.setPrivateKey()` — prueba de posesion |
+
+#### Sintaxis C utilizada
+
+```cpp
+static const char MQTT_CA_CERT[] PROGMEM = R"EOF(
+-----BEGIN CERTIFICATE-----
+(contenido PEM)
+-----END CERTIFICATE-----
+)EOF";
+```
+
+- **`PROGMEM`**: Almacena el dato en **flash** (memoria no volatil), NO en RAM.
+  El ESP32 tiene solo ~320 KB de RAM; sin PROGMEM, los certificados la llenarian.
+- **`R"EOF(...)EOF"`**: Raw string literal. Permite strings multilínea sin necesidad
+  de escapar caracteres especiales (`\n`, `"`, etc.). `EOF` es un delimitador
+  arbitrario; puedes usar cualquier palabra.
+
+### 9.4 Generar `certs.h` automaticamente
+
+Desde tu Mac (en la carpeta del proyecto), ejecuta:
+
+```bash
+python3 -c "
+import sys
+import os
+
+def pem_to_c_var(filepath, var_name):
+    with open(filepath, 'r') as f:
+        pem = f.read().strip()
+    return f'static const char {var_name}[] PROGMEM = R\"EOF(\n{pem}\n)EOF\";'
+
+ca = pem_to_c_var('firmware/esp32/certs/ca.crt', 'MQTT_CA_CERT')
+cert = pem_to_c_var('firmware/esp32/certs/EM-esp32_01.crt', 'MQTT_CLIENT_CERT')
+key = pem_to_c_var('firmware/esp32/certs/EM-esp32_01.key', 'MQTT_CLIENT_KEY')
+
+header = '''#ifndef CERTS_H
+#define CERTS_H
+
+// Certificados PEM para conexion MQTT con TLS/mTLS
+// Generado automaticamente — NO editar manualmente
+// Para regenerar: python3 generate_certs.py
+
+{ca}
+
+{cert}
+
+{key}
+
+#endif // CERTS_H
+'''.format(ca=ca, cert=cert, key=key)
+
+with open('firmware/esp32/certs.h', 'w') as f:
+    f.write(header)
+print('certs.h generado correctamente en firmware/esp32/certs.h')
+"
+```
+
+### 9.5 Crear `certs.h` manualmente
+
+Si prefieres hacerlo a mano:
+
+1. Abre `firmware/esp32/certs/ca.crt` en un editor de texto
+2. Copia **todo** el contenido (incluyendo `-----BEGIN...` y `-----END...`)
+3. Pega en `certs.h` dentro de `R"EOF(...)EOF"`
+4. Repite para `EM-esp32_01.crt` y `EM-esp32_01.key`
+
+Estructura final de `certs.h`:
+
+```cpp
+#ifndef CERTS_H
+#define CERTS_H
+
+static const char MQTT_CA_CERT[] PROGMEM = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIIFCzCCAvOgAwIBAgIULP...
+-----END CERTIFICATE-----
+)EOF";
+
+static const char MQTT_CLIENT_CERT[] PROGMEM = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIIE+zCCAuOgAwIBAgIUDM...
+-----END CERTIFICATE-----
+)EOF";
+
+static const char MQTT_CLIENT_KEY[] PROGMEM = R"EOF(
+-----BEGIN PRIVATE KEY-----
+MIIJQwIBADANBgkqhkiG9w...
+-----END PRIVATE KEY-----
+)EOF";
+
+#endif // CERTS_H
+```
+
+> **IMPORTANTE:** `certs.h` esta en `.gitignore`. Nunca lo subas al repositorio
+> porque contiene claves privadas.
+
+### 9.6 Cambios en `esp32.ino` para TLS
+
+El firmware ya incluye estos cambios. Solo para referencia, los 3 puntos clave:
+
+**1. Includes necesarios:**
+
+```cpp
+#include <WiFi.h>
+#include <WiFiClientSecure.h>   // ← soporte TLS
+#include <time.h>               // ← NTP para fechas de certificados
+#include <PubSubClient.h>
+#include "config.h"
+#include "certs.h"              // ← certificados embebidos
+```
+
+**2. Tipo de cliente WiFi:**
+
+```diff
+- WiFiClient   wifiClient;
++ WiFiClientSecure wifiClient;
+```
+
+**3. En `setup()`, despues de conectar WiFi y antes de MQTT:**
+
+```cpp
+// NTP: obligatorio para validar fechas de certificados
+configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+delay(2000);
+
+// Cargar certificados para mTLS
+wifiClient.setCACert(MQTT_CA_CERT);
+wifiClient.setCertificate(MQTT_CLIENT_CERT);
+wifiClient.setPrivateKey(MQTT_CLIENT_KEY);
+```
+
+### 9.7 Flujo de conexion TLS
+
+```
+WiFi conectado
+      │
+      ▼
+configTime()           ← sincroniza reloj via NTP (obligatorio para TLS)
+      │
+      ▼
+setCACert()            ← carga CA para validar al broker
+setCertificate()       ← carga certificado de identidad del ESP32
+setPrivateKey()        ← carga clave privada para prueba de posesion
+      │
+      ▼
+mqtt.connect()         ← handshake TLS/mTLS automatico
+      │
+      ▼
+CONNACK (0)            ← conexion aceptada, MQTT cifrado activo
+```
+
+### 9.8 Diagnostico de TLS
+
+Si la conexion TLS falla, revisa el **Monitor Serial** (115200 baud):
+
+| Mensaje | Causa probable |
+|---|---|
+| `[NTP] Sincronizando reloj para TLS...` | NTP funcionando |
+| `[TLS] Certificados cargados` | Certificados OK |
+| `[MQTT] Conectando... FALLO (rc=-4)` | Error TLS: certificado invalido o expirado |
+| `[MQTT] Conectando... FALLO (rc=-5)` | Error TLS:连接 rechazada (broker no acepta cert) |
+| `[MQTT] Conectando... FALLO (rc=-2)` | Error de red: broker no accesible |
+
+### 9.9 Agregar un nuevo ESP32 con TLS
+
+Para un segundo ESP32 (ej: `esp32_02`):
+
+1. Generar certificado: `openssl genrsa -out EM-esp32_02.key 2048`
+2. Crear CSR: `openssl req -new -key EM-esp32_02.key -out EM-esp32_02.csr -subj "/CN=EM-esp32_02"`
+3. Firmar: `openssl x509 -req -in EM-esp32_02.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out EM-esp32_02.crt -days 825 -sha256`
+4. Copiar PEM a `firmware/esp32/certs/`
+5. Regenerar `certs.h` con el script de la seccion 9.4
+6. Actualizar ACL en `deploy/mosquitto/acl`:
+
+```conf
+user esp32_02
+topic readwrite sensors/esp32_02
+topic readwrite commands/esp32_02
+topic readwrite devices/esp32_02/status
+```
